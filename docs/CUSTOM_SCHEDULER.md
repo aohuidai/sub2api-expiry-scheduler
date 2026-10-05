@@ -37,16 +37,21 @@ specific reviewed source revision. The running binary reports the compatible
 semantic version `0.2.13-dai.1`, so the admin update check continues to compare
 correctly against official versions.
 
-The `Build Custom Image` workflow publishes ARM64 images to:
+The `Build Custom Image` workflow also publishes ARM64 images to:
 
 ```text
 ghcr.io/aohuidai/sub2api-expiry-scheduler:<custom-tag>
 ```
 
-Because this repository is private, the Oracle host needs a GitHub token with
-read-only package access before it can pull from GHCR. Keep that token outside
-this repository and outside Compose files. The image is intentionally never
-tagged `latest`.
+The image is intentionally never tagged `latest`.
+
+The production Oracle host currently uses a local ARM64 build from the reviewed
+tag rather than pulling the private GHCR package. That keeps the repository and
+package private and avoids storing a GitHub package token on the server. GHCR
+is therefore a build artifact and an optional future deployment source, not a
+deployment prerequisite. If GHCR is used later, give the host a dedicated
+read-only `read:packages` credential outside this repository and outside
+Compose files.
 
 ## Updating From Official Sub2API
 
@@ -64,7 +69,9 @@ Before accepting a sync PR:
 2. Verify the scheduler setting, tests, and UI still build.
 3. Merge the reviewed PR into `main`.
 4. Create and push a new annotated `dai-v...` tag to build a fresh ARM64 image.
-5. Verify the GHCR image digest before changing the server's pinned image tag.
+5. Deploy that exact tag only after review and a fresh server backup. Never
+   change production because a GitHub workflow merely detected an upstream
+   release.
 
 Useful local commands:
 
@@ -74,6 +81,25 @@ git switch main
 git switch -c sync/upstream-vX.Y.Z
 git merge --no-ff upstream/vX.Y.Z
 ```
+
+### Oracle Deployment Path
+
+For the current private deployment, archive the reviewed tag, transfer only
+that source archive to the Oracle host, and build an ARM64 image there. The
+running Compose image must stay pinned to the matching custom tag, for example
+`sub2api-expiry-scheduler:dai-v0.2.13.1`.
+
+Each deployment must:
+
+1. Back up the Compose files, `.env`, PostgreSQL dump, and `/srv/sub2api/data`
+   under `/srv/backups/sub2api/` before changing the image.
+2. Validate the database dump with `pg_restore --list` and preserve checksums.
+3. Recreate only the `sub2api` Compose service with `--no-deps`.
+4. Verify Docker health, `/health`, startup logs, and the intended scheduler
+   setting before treating the deployment as complete.
+
+Do not use Sub2API's online-update button for this fork: it can replace the
+custom image with an official image and remove this scheduler behavior.
 
 ## Verification
 
@@ -93,6 +119,8 @@ pnpm typecheck
 After deployment, verify the health endpoint, the admin settings response, and
 the score snapshot before enabling `long`. Enable it only after quota data has
 recorded future long-window reset times for the accounts expected to take part.
+The setting cache expires within a few seconds; a separate restart is not
+required solely to switch between `short` and `long`.
 
 ## Rollback
 
