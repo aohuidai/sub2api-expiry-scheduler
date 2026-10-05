@@ -257,6 +257,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		openAIAdvancedSchedulerSettingKey:                            "false",
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
+		SettingKeyOpenAIAdvancedSchedulerResetWindowMode:             string(openAIAdvancedSchedulerResetWindowModeShort),
 		SettingKeyOpenAIAdvancedSchedulerLBTopK:                      "",
 		SettingKeyOpenAIAdvancedSchedulerWeightPriority:              "",
 		SettingKeyOpenAIAdvancedSchedulerWeightLoad:                  "",
@@ -932,6 +933,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAIAdvancedSchedulerEnabled = settings[openAIAdvancedSchedulerSettingKey] == "true"
 	result.OpenAIAdvancedSchedulerStickyWeightedEnabled = settings[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] == "true"
 	result.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled = settings[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] == "true"
+	result.OpenAIAdvancedSchedulerResetWindowMode = string(openAIAdvancedSchedulerResetWindowModeFromRaw(settings[SettingKeyOpenAIAdvancedSchedulerResetWindowMode]))
 	result.OpenAIAdvancedSchedulerLBTopK = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 	result.OpenAIAdvancedSchedulerWeightPriority = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightPriority])
 	result.OpenAIAdvancedSchedulerWeightLoad = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightLoad])
@@ -1096,6 +1098,11 @@ func (s *SettingService) normalizeOpenAIAdvancedSchedulerOverrides(settings *Sys
 	if rate := settings.OpenAIOAuthSchedulingRateMultiplier; rate != nil && (*rate < 0 || math.IsNaN(*rate) || math.IsInf(*rate, 0)) {
 		return infraerrors.BadRequest("INVALID_OPENAI_OAUTH_SCHEDULING_RATE_MULTIPLIER", "OpenAI OAuth scheduling rate multiplier must be a finite non-negative number")
 	}
+	resetWindowMode, err := normalizeOpenAIAdvancedSchedulerResetWindowMode(settings.OpenAIAdvancedSchedulerResetWindowMode)
+	if err != nil {
+		return infraerrors.BadRequest("INVALID_OPENAI_ADVANCED_SCHEDULER_RESET_WINDOW_MODE", "openai advanced scheduler reset window mode must be short or long")
+	}
+	settings.OpenAIAdvancedSchedulerResetWindowMode = resetWindowMode
 
 	lbTopK, err := normalizeOptionalPositiveIntString(settings.OpenAIAdvancedSchedulerLBTopK)
 	if err != nil {
@@ -1143,6 +1150,17 @@ func (s *SettingService) normalizeOpenAIAdvancedSchedulerOverrides(settings *Sys
 		return infraerrors.BadRequest("INVALID_OPENAI_ADVANCED_SCHEDULER_WEIGHT", "openai advanced scheduler weights must have finite non-zero base and total sums")
 	}
 	return nil
+}
+
+func normalizeOpenAIAdvancedSchedulerResetWindowMode(raw string) (string, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(raw)); normalized {
+	case "", string(openAIAdvancedSchedulerResetWindowModeShort):
+		return string(openAIAdvancedSchedulerResetWindowModeShort), nil
+	case string(openAIAdvancedSchedulerResetWindowModeLong):
+		return string(openAIAdvancedSchedulerResetWindowModeLong), nil
+	default:
+		return "", fmt.Errorf("unsupported reset window mode %q", raw)
+	}
 }
 
 func parseOpenAIOAuthSchedulingRateMultiplier(settings map[string]string) *float64 {

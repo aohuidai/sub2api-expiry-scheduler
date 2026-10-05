@@ -291,6 +291,9 @@ func newOpenAIAdvancedSchedulerRateLimitService(enabled string, values ...string
 	if len(values) > 1 && values[1] != "" {
 		repo.values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = values[1]
 	}
+	if len(values) > 2 && values[2] != "" {
+		repo.values[SettingKeyOpenAIAdvancedSchedulerResetWindowMode] = values[2]
+	}
 	return &RateLimitService{
 		settingService: NewSettingService(repo, &config.Config{}),
 	}
@@ -364,6 +367,22 @@ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_DBOverrides
 	require.Equal(t, 0.25, weights.Reset)
 	require.Equal(t, 12.0, weights.Previous)
 	require.Equal(t, 10.0, weights.SessionSticky)
+	require.Equal(t, openAIAdvancedSchedulerResetWindowModeShort, svc.openAIAdvancedSchedulerResetWindowMode(ctx))
+}
+
+func TestOpenAIGatewayService_OpenAIAdvancedSchedulerResetWindowMode(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	cfg := &config.Config{}
+	svc := &OpenAIGatewayService{
+		cfg: cfg,
+		rateLimitService: &RateLimitService{settingService: NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+			openAIAdvancedSchedulerSettingKey:                "true",
+			SettingKeyOpenAIAdvancedSchedulerResetWindowMode: "long",
+		}}, cfg)},
+	}
+	require.Equal(t, openAIAdvancedSchedulerResetWindowModeLong, svc.openAIAdvancedSchedulerResetWindowMode(context.Background()))
 }
 
 func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_InvalidWeightSumsFallBackToConfig(t *testing.T) {

@@ -5209,6 +5209,36 @@
               >
                 <div class="min-w-0">
                   <label
+                    for="openai-advanced-scheduler-reset-window-mode"
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowModeTitle") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowModeDescription") }}
+                  </p>
+                </div>
+                <select
+                  id="openai-advanced-scheduler-reset-window-mode"
+                  v-model="form.openai_advanced_scheduler_reset_window_mode"
+                  class="input w-full shrink-0 sm:w-52"
+                  data-testid="openai-advanced-scheduler-reset-window-mode"
+                >
+                  <option value="short">
+                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowShort") }}
+                  </option>
+                  <option value="long">
+                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowLong") }}
+                  </option>
+                </select>
+              </div>
+
+              <div
+                v-if="form.openai_advanced_scheduler_enabled"
+                class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
+              >
+                <div class="min-w-0">
+                  <label
                     class="text-sm font-medium text-gray-700 dark:text-gray-300"
                     for="openai-oauth-scheduling-rate-multiplier"
                   >
@@ -9744,6 +9774,7 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_enabled: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
+  openai_advanced_scheduler_reset_window_mode: "short" | "long";
   openai_advanced_scheduler_lb_top_k: string;
   openai_advanced_scheduler_weight_priority: string;
   openai_advanced_scheduler_weight_load: string;
@@ -9995,6 +10026,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
+  openai_advanced_scheduler_reset_window_mode: "short",
   openai_advanced_scheduler_lb_top_k: "",
   openai_advanced_scheduler_weight_priority: "",
   openai_advanced_scheduler_weight_load: "",
@@ -11741,6 +11773,8 @@ async function saveSettings() {
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:
         form.openai_advanced_scheduler_subscription_priority_enabled,
+      openai_advanced_scheduler_reset_window_mode:
+        form.openai_advanced_scheduler_reset_window_mode,
       openai_advanced_scheduler_lb_top_k:
         form.openai_advanced_scheduler_lb_top_k.trim(),
       openai_advanced_scheduler_weight_priority:
