@@ -31,9 +31,11 @@ this fork alone does not change traffic routing.
 plus this patch. Do not replace `main` with upstream or force-push it to an
 official tag.
 
-Custom images use tags beginning with `dai-v`, such as `dai-v0.2.13.1`. This
-avoids triggering the upstream release workflow, and each image remains pinned
-to a specific reviewed source revision.
+Custom images use `dai-vX.Y.Z.N` tags, such as `dai-v0.2.13.1`. This avoids
+triggering the upstream release workflow, and each image remains pinned to a
+specific reviewed source revision. The running binary reports the compatible
+semantic version `0.2.13-dai.1`, so the admin update check continues to compare
+correctly against official versions.
 
 The `Build Custom Image` workflow publishes ARM64 images to:
 

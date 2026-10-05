@@ -48,11 +48,13 @@ jobs:
           else
             image_tag="$INPUT_TAG"
           fi
-          if [[ ! "$image_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid Docker image tag: $image_tag" >&2
+          if [[ ! "$image_tag" =~ ^dai-v([0-9]+\.[0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
+            echo "Custom image tags must use dai-vX.Y.Z.N, for example dai-v0.2.13.1" >&2
             exit 1
           fi
+          runtime_version="${BASH_REMATCH[1]}-dai.${BASH_REMATCH[2]}"
           echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "runtime_version=$runtime_version" >> "$GITHUB_OUTPUT"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
@@ -83,7 +85,7 @@ jobs:
             org.opencontainers.image.revision=${{ steps.image.outputs.source_sha }}
             org.opencontainers.image.version=${{ steps.image.outputs.tag }}
           build-args: |
-            VERSION=${{ steps.image.outputs.tag }}
+            VERSION=${{ steps.image.outputs.runtime_version }}
             COMMIT=${{ steps.image.outputs.source_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
