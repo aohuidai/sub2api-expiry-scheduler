@@ -21,7 +21,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: custom-image-${{ github.ref }}
+  group: custom-image-${{ inputs.image_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -53,6 +53,7 @@ jobs:
             exit 1
           fi
           echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -76,13 +77,13 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.image.outputs.tag }}
-            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository }}:sha-${{ steps.image.outputs.source_sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.image.outputs.source_sha }}
             org.opencontainers.image.version=${{ steps.image.outputs.tag }}
           build-args: |
             VERSION=${{ steps.image.outputs.tag }}
-            COMMIT=${{ github.sha }}
+            COMMIT=${{ steps.image.outputs.source_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
