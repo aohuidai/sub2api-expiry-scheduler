@@ -1872,7 +1872,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled
 		}(),
-		OpenAIAdvancedSchedulerResetWindowMode:           stringSetting(req.OpenAIAdvancedSchedulerResetWindowMode, previousSettings.OpenAIAdvancedSchedulerResetWindowMode),
+		OpenAIAdvancedSchedulerResetWindowMode:        stringSetting(req.OpenAIAdvancedSchedulerResetWindowMode, previousSettings.OpenAIAdvancedSchedulerResetWindowMode),
 		OpenAIAdvancedSchedulerLBTopK:                 stringSetting(req.OpenAIAdvancedSchedulerLBTopK, previousSettings.OpenAIAdvancedSchedulerLBTopK),
 		OpenAIAdvancedSchedulerWeightPriority:         stringSetting(req.OpenAIAdvancedSchedulerWeightPriority, previousSettings.OpenAIAdvancedSchedulerWeightPriority),
 		OpenAIAdvancedSchedulerWeightLoad:             stringSetting(req.OpenAIAdvancedSchedulerWeightLoad, previousSettings.OpenAIAdvancedSchedulerWeightLoad),

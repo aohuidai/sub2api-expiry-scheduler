@@ -378,7 +378,7 @@ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerResetWindowMode(t *testing.
 	svc := &OpenAIGatewayService{
 		cfg: cfg,
 		rateLimitService: &RateLimitService{settingService: NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-			openAIAdvancedSchedulerSettingKey:                    "true",
+			openAIAdvancedSchedulerSettingKey:                "true",
 			SettingKeyOpenAIAdvancedSchedulerResetWindowMode: "long",
 		}}, cfg)},
 	}
