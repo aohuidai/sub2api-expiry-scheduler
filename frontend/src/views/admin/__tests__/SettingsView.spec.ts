@@ -1597,6 +1597,19 @@ describe("admin SettingsView payment visible method controls", () => {
     }));
   });
 
+  it("saves the strict long reset window mode", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-advanced-scheduler-reset-window-mode"]');
+    await select.setValue("long_strict");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_advanced_scheduler_reset_window_mode: "long_strict",
+    }));
+  });
+
   it("places and explains rate controls for both scheduling modes", async () => {
     const wrapper = mountView();
 

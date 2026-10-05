@@ -385,6 +385,21 @@ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerResetWindowMode(t *testing.
 	require.Equal(t, openAIAdvancedSchedulerResetWindowModeLong, svc.openAIAdvancedSchedulerResetWindowMode(context.Background()))
 }
 
+func TestOpenAIGatewayService_OpenAIAdvancedSchedulerStrictLongResetWindowMode(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	cfg := &config.Config{}
+	svc := &OpenAIGatewayService{
+		cfg: cfg,
+		rateLimitService: &RateLimitService{settingService: NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+			openAIAdvancedSchedulerSettingKey:                "true",
+			SettingKeyOpenAIAdvancedSchedulerResetWindowMode: "long_strict",
+		}}, cfg)},
+	}
+	require.Equal(t, openAIAdvancedSchedulerResetWindowModeLongStrict, svc.openAIAdvancedSchedulerResetWindowMode(context.Background()))
+}
+
 func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_InvalidWeightSumsFallBackToConfig(t *testing.T) {
 	base := config.GatewayOpenAIWSSchedulerScoreWeights{
 		Priority: 1, Load: 2, Queue: 3, ErrorRate: 4, TTFT: 5, Reset: 6,

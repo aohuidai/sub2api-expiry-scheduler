@@ -10,16 +10,25 @@ The setting is named `openai_advanced_scheduler_reset_window_mode`.
 
 - `short` is the upstream-compatible default. The reset score uses the Codex
   5-hour window, then the legacy session window.
-- `long` uses the canonical `codex_7d` quota reset timestamp. Despite the
+- `long` uses the canonical `codex_7d` quota reset timestamp as a weighted
+  score signal. Despite the
   historic field name, this can represent a 7-day, 30-day, or another long
   provider window. Accounts without a valid future long reset timestamp get a
   reset factor of zero; they never fall back to a 5-hour window in this mode.
+- `long_strict` is the explicit use-it-or-lose-it mode. For a new
+  load-balanced request, usable accounts with a future long reset timestamp
+  are tried in earliest-reset order, before accounts with stale or unknown
+  quota snapshots. It bypasses TopK random selection for that primary order,
+  but falls back safely when an earlier account is full, rate-limited, or no
+  longer schedulable.
 
-The existing reset-score weight still controls how strongly this factor affects
-the final choice. A reset weight of `1` is a preference among the other health,
-load, queue, sticky-session, and priority signals. Raise it deliberately when
-the intended policy is to consume accounts with the soonest long-window reset
-first.
+The existing reset-score weight still controls how strongly `long` affects the
+final choice. A reset weight of `1` is a preference among the other health,
+load, queue, sticky-session, and priority signals. `long_strict` does not need
+a large reset weight because reset time becomes the first ordering criterion.
+Neither mode can select an account that is already at its provider limit, and
+requests carrying `previous_response_id` remain pinned to their upstream
+account to preserve conversation correctness.
 
 The setting is available in the admin Settings page while the OpenAI advanced
 scheduler is enabled. Existing deployments default to `short`, so upgrading

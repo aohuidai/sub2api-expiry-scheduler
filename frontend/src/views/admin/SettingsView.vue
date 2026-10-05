@@ -5230,6 +5230,9 @@
                   <option value="long">
                     {{ t("admin.settings.openaiExperimentalScheduler.resetWindowLong") }}
                   </option>
+                  <option value="long_strict">
+                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowLongStrict") }}
+                  </option>
                 </select>
               </div>
 
@@ -9774,7 +9777,7 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_enabled: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
-  openai_advanced_scheduler_reset_window_mode: "short" | "long";
+  openai_advanced_scheduler_reset_window_mode: "short" | "long" | "long_strict";
   openai_advanced_scheduler_lb_top_k: string;
   openai_advanced_scheduler_weight_priority: string;
   openai_advanced_scheduler_weight_load: string;

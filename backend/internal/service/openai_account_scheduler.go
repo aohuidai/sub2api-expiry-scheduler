@@ -53,13 +53,29 @@ const (
 	// duration is supplied by the account snapshot and may be 7d, 30d, or
 	// another provider-defined long window.
 	openAIAdvancedSchedulerResetWindowModeLong openAIAdvancedSchedulerResetWindowMode = "long"
+	// long_strict makes the recorded long reset timestamp the first ordering
+	// criterion for new load-balanced requests. It still falls back when the
+	// earliest account has no usable slot or is no longer schedulable.
+	openAIAdvancedSchedulerResetWindowModeLongStrict openAIAdvancedSchedulerResetWindowMode = "long_strict"
 )
 
 func openAIAdvancedSchedulerResetWindowModeFromRaw(raw string) openAIAdvancedSchedulerResetWindowMode {
-	if strings.EqualFold(strings.TrimSpace(raw), string(openAIAdvancedSchedulerResetWindowModeLong)) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(openAIAdvancedSchedulerResetWindowModeLong):
 		return openAIAdvancedSchedulerResetWindowModeLong
+	case string(openAIAdvancedSchedulerResetWindowModeLongStrict):
+		return openAIAdvancedSchedulerResetWindowModeLongStrict
 	}
 	return openAIAdvancedSchedulerResetWindowModeShort
+}
+
+func (m openAIAdvancedSchedulerResetWindowMode) usesLongQuotaWindow() bool {
+	return m == openAIAdvancedSchedulerResetWindowModeLong ||
+		m == openAIAdvancedSchedulerResetWindowModeLongStrict
+}
+
+func (m openAIAdvancedSchedulerResetWindowMode) isStrictLongQuotaWindow() bool {
+	return m == openAIAdvancedSchedulerResetWindowModeLongStrict
 }
 
 type cachedOpenAIAdvancedSchedulerSetting struct {
@@ -168,6 +184,7 @@ type openAIAccountLoadPlan struct {
 	topK                      int
 	loadSkew                  float64
 	includeOverflowFallback   bool
+	strictLongReset           bool
 }
 
 type openAIAccountLoadSelectionAttempt struct {
@@ -988,6 +1005,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	minResetRemaining, maxResetRemaining := 0.0, 0.0
 	hasResetSample := false
 	resetWindowMode := s.service.openAIAdvancedSchedulerResetWindowMode(ctx)
+	plan.strictLongReset = resetWindowMode.isStrictLongQuotaWindow()
 	if weights.Reset > 0 {
 		for _, candidate := range candidates {
 			end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now)
@@ -1077,6 +1095,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	req OpenAIAccountScheduleRequest,
 	plan openAIAccountLoadPlan,
 ) []openAIAccountCandidateScore {
+	if plan.strictLongReset {
+		return s.buildOpenAIStrictLongResetSelectionOrder(req, plan)
+	}
+
 	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 		if len(pool) == 0 || plan.topK <= 0 {
 			return nil
@@ -1148,6 +1170,85 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	}
 
 	return buildSelectionOrder(plan.candidates)
+}
+
+// buildOpenAIStrictLongResetSelectionOrder implements the explicit
+// use-it-or-lose-it policy. Future long-window reset timestamps form the
+// primary pool and are tried in chronological order. Candidates without a
+// usable long reset timestamp remain a deterministic fallback so one stale
+// quota snapshot cannot make a group unavailable.
+func (s *defaultOpenAIAccountScheduler) buildOpenAIStrictLongResetSelectionOrder(
+	req OpenAIAccountScheduleRequest,
+	plan openAIAccountLoadPlan,
+) []openAIAccountCandidateScore {
+	type resetCandidate struct {
+		candidate openAIAccountCandidateScore
+		resetAt   time.Time
+	}
+
+	orderPool := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+		if len(pool) == 0 {
+			return nil
+		}
+
+		now := time.Now()
+		withFutureReset := make([]resetCandidate, 0, len(pool))
+		fallback := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range pool {
+			if resetAt, ok := openAISchedulingResetWindowEndForMode(
+				candidate.account,
+				openAIAdvancedSchedulerResetWindowModeLongStrict,
+				now,
+			); ok {
+				withFutureReset = append(withFutureReset, resetCandidate{candidate: candidate, resetAt: resetAt})
+				continue
+			}
+			fallback = append(fallback, candidate)
+		}
+
+		sort.Slice(withFutureReset, func(i, j int) bool {
+			if !withFutureReset[i].resetAt.Equal(withFutureReset[j].resetAt) {
+				return withFutureReset[i].resetAt.Before(withFutureReset[j].resetAt)
+			}
+			return isOpenAIAccountCandidateBetter(withFutureReset[i].candidate, withFutureReset[j].candidate)
+		})
+		sort.Slice(fallback, func(i, j int) bool {
+			return isOpenAIAccountCandidateBetter(fallback[i], fallback[j])
+		})
+
+		ordered := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range withFutureReset {
+			ordered = append(ordered, candidate.candidate)
+		}
+		return append(ordered, fallback...)
+	}
+
+	if len(plan.candidates) == 0 {
+		return nil
+	}
+	if !req.RequireCompact {
+		return orderPool(plan.candidates)
+	}
+
+	// Compact-capable accounts must keep their compatibility tier ahead of
+	// unknown accounts; expiry ordering applies within each safe tier.
+	supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
+	unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
+	for _, candidate := range plan.candidates {
+		switch openAICompactSupportTier(candidate.account) {
+		case 2:
+			supported = append(supported, candidate)
+		case 1:
+			unknown = append(unknown, candidate)
+		}
+	}
+	selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
+	selectionOrder = append(selectionOrder, orderPool(supported)...)
+	selectionOrder = append(selectionOrder, orderPool(unknown)...)
+	if len(plan.staleSnapshotCompactRetry) > 0 && s != nil && s.service != nil && s.service.schedulerSnapshot != nil {
+		selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
+	}
+	return selectionOrder
 }
 
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
@@ -3180,7 +3281,7 @@ func openAISchedulingResetWindowEndForMode(account *Account, mode openAIAdvanced
 	if account == nil {
 		return time.Time{}, false
 	}
-	if mode == openAIAdvancedSchedulerResetWindowModeLong {
+	if mode.usesLongQuotaWindow() {
 		// codex_7d is the canonical secondary window name. The actual window may
 		// be 7 days, 30 days, or a future long duration, so only reject an
 		// explicitly recorded short (5h-or-less) duration. Older snapshots that

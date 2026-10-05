@@ -1100,7 +1100,7 @@ func (s *SettingService) normalizeOpenAIAdvancedSchedulerOverrides(settings *Sys
 	}
 	resetWindowMode, err := normalizeOpenAIAdvancedSchedulerResetWindowMode(settings.OpenAIAdvancedSchedulerResetWindowMode)
 	if err != nil {
-		return infraerrors.BadRequest("INVALID_OPENAI_ADVANCED_SCHEDULER_RESET_WINDOW_MODE", "openai advanced scheduler reset window mode must be short or long")
+		return infraerrors.BadRequest("INVALID_OPENAI_ADVANCED_SCHEDULER_RESET_WINDOW_MODE", "openai advanced scheduler reset window mode must be short, long, or long_strict")
 	}
 	settings.OpenAIAdvancedSchedulerResetWindowMode = resetWindowMode
 
@@ -1158,6 +1158,8 @@ func normalizeOpenAIAdvancedSchedulerResetWindowMode(raw string) (string, error)
 		return string(openAIAdvancedSchedulerResetWindowModeShort), nil
 	case string(openAIAdvancedSchedulerResetWindowModeLong):
 		return string(openAIAdvancedSchedulerResetWindowModeLong), nil
+	case string(openAIAdvancedSchedulerResetWindowModeLongStrict):
+		return string(openAIAdvancedSchedulerResetWindowModeLongStrict), nil
 	default:
 		return "", fmt.Errorf("unsupported reset window mode %q", raw)
 	}

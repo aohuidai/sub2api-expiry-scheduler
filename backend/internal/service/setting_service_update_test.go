@@ -458,6 +458,14 @@ func TestSettingService_UpdateSettingsRejectsInvalidOpenAIAdvancedSchedulerReset
 	require.Error(t, err)
 }
 
+func TestSettingService_UpdateSettingsAcceptsStrictOpenAIAdvancedSchedulerResetWindowMode(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{OpenAIAdvancedSchedulerResetWindowMode: " long_strict "})
+	require.NoError(t, err)
+	require.Equal(t, "long_strict", repo.updates[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
+}
+
 func TestSettingService_UpdateSettingsRejectsInvalidOpenAIOAuthSchedulingRateMultiplier(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
