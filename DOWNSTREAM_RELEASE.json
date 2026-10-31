@@ -1,0 +1,16 @@
+{
+  "upstream_tag": "v0.2.19",
+  "custom_revision": 2,
+  "upstream_commit": "dece26153621959ccd7635814f4b2d08304e681a",
+  "maintenance_commit": "6fe08e609115ea0e133a8161d21a63da11efae55",
+  "patches": [
+    {
+      "id": "openai-long-window-reset",
+      "sha256": "38f7497667c50750c936693ed255e9f14293ab26a3a007c9e2c6218c7e83e857"
+    },
+    {
+      "id": "frontend-security",
+      "sha256": "a8a848d625da416ace2825378a72105513a108ed1fff5d1c9023baaba4fec1f5"
+    }
+  ]
+}

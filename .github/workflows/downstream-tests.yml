@@ -1,0 +1,40 @@
+name: Downstream Patch Queue
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-queue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Test release preparation and conflict handling
+        run: python -m unittest discover -s tools/downstream -p 'test_*.py'
+      - name: Verify the feature patches against their official baseline
+        run: |
+          set -euo pipefail
+          tag="$(python -c 'import json; print(json.load(open("patches/downstream/series.json"))["baseline"])')"
+          revision=1
+          if [[ -f DOWNSTREAM_RELEASE.json ]]; then
+            tag="$(python -c 'import json; print(json.load(open("DOWNSTREAM_RELEASE.json"))["upstream_tag"])')"
+            revision="$(python -c 'import json; print(json.load(open("DOWNSTREAM_RELEASE.json"))["custom_revision"])')"
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/Wei-Shaw/sub2api.git "refs/tags/$tag:refs/tags/upstream/$tag"
+          python tools/downstream/prepare_release.py --upstream-ref "refs/tags/upstream/$tag" \
+            --upstream-tag "$tag" --revision "$revision" --output "$RUNNER_TEMP/verified-release.json"
+          candidate="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidate_sha"])' "$RUNNER_TEMP/verified-release.json")"
+          git diff --exit-code HEAD "$candidate" -- backend frontend \
+            .github/audit-exceptions.yml .github/workflows/backend-ci.yml .github/workflows/security-scan.yml
