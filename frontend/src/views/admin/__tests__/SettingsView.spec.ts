@@ -510,6 +510,7 @@ const baseSettingsResponse = {
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
+  openai_advanced_scheduler_reset_window_mode: "short",
   openai_advanced_scheduler_lb_top_k: "",
   openai_advanced_scheduler_weight_priority: "",
   openai_advanced_scheduler_weight_load: "",
@@ -1580,6 +1581,32 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       openai_oauth_scheduling_rate_multiplier: null,
+    }));
+  });
+
+  it("saves the selected advanced scheduler reset window mode", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-advanced-scheduler-reset-window-mode"]');
+    await select.setValue("long");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_advanced_scheduler_reset_window_mode: "long",
+    }));
+  });
+
+  it("saves the strict long reset window mode", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-advanced-scheduler-reset-window-mode"]');
+    await select.setValue("long_strict");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_advanced_scheduler_reset_window_mode: "long_strict",
     }));
   });
 
