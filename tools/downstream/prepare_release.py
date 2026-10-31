@@ -59,9 +59,11 @@ def copy_maintenance(repo, source, destination, paths):
                 raise ValueError("Maintenance archive must contain regular files")
 
 
-def prepare(repo, upstream_ref, tag, source):
+def prepare(repo, upstream_ref, tag, source, revision=1):
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
         raise ValueError("Expected an official vX.Y.Z release tag")
+    if not 1 <= revision <= 9999:
+        raise ValueError("Custom revision must be between 1 and 9999")
     source_sha = git(repo, "rev-parse", source + "^{commit}").decode().strip()
     upstream_sha = git(repo, "rev-parse", upstream_ref + "^{commit}").decode().strip()
     manifest = read_manifest(repo, source_sha)
@@ -78,6 +80,7 @@ def prepare(repo, upstream_ref, tag, source):
         copy_maintenance(repo, source_sha, worktree, manifest["maintenance_paths"])
         metadata = {
             "upstream_tag": tag,
+            "custom_revision": revision,
             "upstream_commit": upstream_sha,
             "maintenance_commit": source_sha,
             "patches": [
@@ -101,10 +104,11 @@ def prepare(repo, upstream_ref, tag, source):
         candidate_sha = git(worktree, "rev-parse", "HEAD").decode().strip()
         git(worktree, "merge-base", "--is-ancestor", upstream_sha, candidate_sha)
         succeeded = True
+        suffix = "" if revision == 1 else "-r" + str(revision)
         return {
             **metadata,
-            "base_branch": "release/" + tag,
-            "candidate_branch": "custom/" + tag,
+            "base_branch": "release/" + tag + suffix,
+            "candidate_branch": "custom/" + tag + suffix,
             "base_sha": base_sha,
             "candidate_sha": candidate_sha,
         }
@@ -121,9 +125,10 @@ def main():
     parser.add_argument("--upstream-ref", required=True)
     parser.add_argument("--upstream-tag", required=True)
     parser.add_argument("--source-ref", default="HEAD")
+    parser.add_argument("--revision", type=int, default=1)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = prepare(args.repo.resolve(), args.upstream_ref, args.upstream_tag, args.source_ref)
+    result = prepare(args.repo.resolve(), args.upstream_ref, args.upstream_tag, args.source_ref, args.revision)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print("Prepared " + result["candidate_branch"] + " from " + result["upstream_tag"])
 

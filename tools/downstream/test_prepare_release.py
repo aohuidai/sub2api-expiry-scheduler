@@ -106,6 +106,12 @@ class PrepareReleaseTests(unittest.TestCase):
             b"custom release instructions\n",
         )
 
+    def test_new_custom_revision_has_separate_review_branches(self):
+        result = prepare(self.repo, "v1.0.0", "v1.0.0", self.source, revision=2)
+        self.assertEqual(result["base_branch"], "release/v1.0.0-r2")
+        self.assertEqual(result["candidate_branch"], "custom/v1.0.0-r2")
+        self.assertEqual(result["custom_revision"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

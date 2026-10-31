@@ -9,6 +9,11 @@ on:
         description: "Official release tag; blank selects the latest stable release"
         required: false
         type: string
+      revision:
+        description: "Custom revision (use 2, 3, ... to review new features on the same official release)"
+        required: false
+        default: "1"
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           INPUT_TAG: ${{ inputs.upstream_tag }}
+          INPUT_REVISION: ${{ inputs.revision || '1' }}
         run: |
           set -euo pipefail
           tag="$INPUT_TAG"
@@ -50,7 +56,13 @@ jobs:
           fi
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid official release tag' >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          proposal="$(gh pr list --head "custom/$tag" --base "release/$tag" --state all --json url --jq '.[0].url // empty')"
+          [[ "$INPUT_REVISION" =~ ^[1-9][0-9]{0,3}$ ]] || { echo 'Invalid custom revision' >&2; exit 1; }
+          suffix=""
+          if [[ "$INPUT_REVISION" != '1' ]]; then suffix="-r$INPUT_REVISION"; fi
+          echo "revision=$INPUT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "base=release/$tag$suffix" >> "$GITHUB_OUTPUT"
+          echo "candidate=custom/$tag$suffix" >> "$GITHUB_OUTPUT"
+          proposal="$(gh pr list --head "custom/$tag$suffix" --base "release/$tag$suffix" --state all --json url --jq '.[0].url // empty')"
           if [[ -n "$proposal" ]]; then
             echo "existing=true" >> "$GITHUB_OUTPUT"
             echo "Existing review (open, closed or merged): $proposal" >> "$GITHUB_STEP_SUMMARY"
@@ -62,6 +74,7 @@ jobs:
         if: steps.release.outputs.existing != 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
+          REVISION: ${{ steps.release.outputs.revision }}
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -69,7 +82,7 @@ jobs:
           git fetch --no-tags https://github.com/Wei-Shaw/sub2api.git "refs/tags/$TAG:refs/tags/upstream/$TAG"
           python tools/downstream/prepare_release.py \
             --upstream-ref "refs/tags/upstream/$TAG" --upstream-tag "$TAG" \
-            --source-ref HEAD --output "$RUNNER_TEMP/downstream-release.json"
+            --revision "$REVISION" --source-ref HEAD --output "$RUNNER_TEMP/downstream-release.json"
 
       - name: Publish immutable review branches
         if: steps.release.outputs.existing != 'true'
@@ -98,6 +111,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.release.outputs.tag }}
+          BASE: ${{ steps.release.outputs.base }}
+          CANDIDATE: ${{ steps.release.outputs.candidate }}
         run: |
           set -euo pipefail
           body="$RUNNER_TEMP/downstream-pr.md"
@@ -115,6 +130,6 @@ jobs:
               "Merging does not build or deploy an image; publish an explicit dai-v tag after review.\n"
           )
           PY
-          url="$(gh pr create --base "release/$TAG" --head "custom/$TAG" \
+          url="$(gh pr create --base "$BASE" --head "$CANDIDATE" \
             --title "Apply downstream features to Sub2API $TAG" --body-file "$body")"
           echo "Review proposal: $url" >> "$GITHUB_STEP_SUMMARY"

@@ -44,6 +44,10 @@ Version branches are never force-pushed by automation. Existing open, closed,
 or merged proposals are recognized, and retries do not overwrite human work.
 Old deployment tags and branches remain available for rollback.
 
+For a new custom feature on the same official version, dispatch with
+`revision=2` (then 3, etc.). This creates separate `release/vX.Y.Z-r2` and
+`custom/vX.Y.Z-r2` branches and a new review; it preserves the first review.
+
 `DOWNSTREAM_RELEASE.json` records the official tag/commit, maintenance commit,
 and SHA-256 of each applied feature patch. Image builds reject a version tag
 that does not match this metadata.
