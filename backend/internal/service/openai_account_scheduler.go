@@ -43,12 +43,48 @@ const (
 	defaultOpenAIOAuthSchedulingRateMultiplier = 1.0
 )
 
+type openAIAdvancedSchedulerResetWindowMode string
+
+const (
+	// short preserves the upstream reset-score behavior: Codex 5h, then the
+	// legacy session window.
+	openAIAdvancedSchedulerResetWindowModeShort openAIAdvancedSchedulerResetWindowMode = "short"
+	// long scores the canonical Codex secondary quota window. Its actual
+	// duration is supplied by the account snapshot and may be 7d, 30d, or
+	// another provider-defined long window.
+	openAIAdvancedSchedulerResetWindowModeLong openAIAdvancedSchedulerResetWindowMode = "long"
+	// long_strict makes the recorded long reset timestamp the first ordering
+	// criterion for new load-balanced requests. It still falls back when the
+	// earliest account has no usable slot or is no longer schedulable.
+	openAIAdvancedSchedulerResetWindowModeLongStrict openAIAdvancedSchedulerResetWindowMode = "long_strict"
+)
+
+func openAIAdvancedSchedulerResetWindowModeFromRaw(raw string) openAIAdvancedSchedulerResetWindowMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(openAIAdvancedSchedulerResetWindowModeLong):
+		return openAIAdvancedSchedulerResetWindowModeLong
+	case string(openAIAdvancedSchedulerResetWindowModeLongStrict):
+		return openAIAdvancedSchedulerResetWindowModeLongStrict
+	}
+	return openAIAdvancedSchedulerResetWindowModeShort
+}
+
+func (m openAIAdvancedSchedulerResetWindowMode) usesLongQuotaWindow() bool {
+	return m == openAIAdvancedSchedulerResetWindowModeLong ||
+		m == openAIAdvancedSchedulerResetWindowModeLongStrict
+}
+
+func (m openAIAdvancedSchedulerResetWindowMode) isStrictLongQuotaWindow() bool {
+	return m == openAIAdvancedSchedulerResetWindowModeLongStrict
+}
+
 type cachedOpenAIAdvancedSchedulerSetting struct {
 	lowUpstreamRatePriorityEnabled bool
 	oauthSchedulingRateMultiplier  *float64
 	enabled                        bool
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
+	resetWindowMode                openAIAdvancedSchedulerResetWindowMode
 	lbTopKOverride                 int
 	weightOverrides                map[string]float64
 	expiresAt                      int64
@@ -60,6 +96,7 @@ type openAIAdvancedSchedulerRuntimeSettings struct {
 	enabled                        bool
 	stickyWeightedEnabled          bool
 	subscriptionPriorityEnabled    bool
+	resetWindowMode                openAIAdvancedSchedulerResetWindowMode
 	lbTopKOverride                 int
 	weightOverrides                map[string]float64
 }
@@ -147,6 +184,7 @@ type openAIAccountLoadPlan struct {
 	topK                      int
 	loadSkew                  float64
 	includeOverflowFallback   bool
+	strictLongReset           bool
 }
 
 type openAIAccountLoadSelectionAttempt struct {
@@ -961,14 +999,16 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		}
 	}
 
-	// Reset 因子（use-it-or-lose-it）：优先读取 Codex 5h 重置时间，回退到会话窗口。
+	// Reset 因子（use-it-or-lose-it）：可按设置读取短窗口或实际的长额度窗口。
 	// 剩余时间越短 → 因子越接近 1（越早重置越优先用尽）。无活跃窗口的账号因子为 0。
 	// 仅在 weights.Reset > 0 时计算，默认关闭不影响原有行为。
 	minResetRemaining, maxResetRemaining := 0.0, 0.0
 	hasResetSample := false
+	resetWindowMode := s.service.openAIAdvancedSchedulerResetWindowMode(ctx)
+	plan.strictLongReset = resetWindowMode.isStrictLongQuotaWindow()
 	if weights.Reset > 0 {
 		for _, candidate := range candidates {
-			end, ok := openAISchedulingResetWindowEnd(candidate.account, now)
+			end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now)
 			if !ok {
 				continue
 			}
@@ -1002,7 +1042,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		}
 		resetFactor := 0.0
 		if weights.Reset > 0 && hasResetSample {
-			if end, ok := openAISchedulingResetWindowEnd(item.account, now); ok {
+			if end, ok := openAISchedulingResetWindowEndForMode(item.account, resetWindowMode, now); ok {
 				if maxResetRemaining > minResetRemaining {
 					resetFactor = 1 - clamp01((end.Sub(now).Seconds()-minResetRemaining)/(maxResetRemaining-minResetRemaining))
 				} else {
@@ -1055,6 +1095,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	req OpenAIAccountScheduleRequest,
 	plan openAIAccountLoadPlan,
 ) []openAIAccountCandidateScore {
+	if plan.strictLongReset {
+		return s.buildOpenAIStrictLongResetSelectionOrder(req, plan)
+	}
+
 	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 		if len(pool) == 0 || plan.topK <= 0 {
 			return nil
@@ -1126,6 +1170,85 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	}
 
 	return buildSelectionOrder(plan.candidates)
+}
+
+// buildOpenAIStrictLongResetSelectionOrder implements the explicit
+// use-it-or-lose-it policy. Future long-window reset timestamps form the
+// primary pool and are tried in chronological order. Candidates without a
+// usable long reset timestamp remain a deterministic fallback so one stale
+// quota snapshot cannot make a group unavailable.
+func (s *defaultOpenAIAccountScheduler) buildOpenAIStrictLongResetSelectionOrder(
+	req OpenAIAccountScheduleRequest,
+	plan openAIAccountLoadPlan,
+) []openAIAccountCandidateScore {
+	type resetCandidate struct {
+		candidate openAIAccountCandidateScore
+		resetAt   time.Time
+	}
+
+	orderPool := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+		if len(pool) == 0 {
+			return nil
+		}
+
+		now := time.Now()
+		withFutureReset := make([]resetCandidate, 0, len(pool))
+		fallback := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range pool {
+			if resetAt, ok := openAISchedulingResetWindowEndForMode(
+				candidate.account,
+				openAIAdvancedSchedulerResetWindowModeLongStrict,
+				now,
+			); ok {
+				withFutureReset = append(withFutureReset, resetCandidate{candidate: candidate, resetAt: resetAt})
+				continue
+			}
+			fallback = append(fallback, candidate)
+		}
+
+		sort.Slice(withFutureReset, func(i, j int) bool {
+			if !withFutureReset[i].resetAt.Equal(withFutureReset[j].resetAt) {
+				return withFutureReset[i].resetAt.Before(withFutureReset[j].resetAt)
+			}
+			return isOpenAIAccountCandidateBetter(withFutureReset[i].candidate, withFutureReset[j].candidate)
+		})
+		sort.Slice(fallback, func(i, j int) bool {
+			return isOpenAIAccountCandidateBetter(fallback[i], fallback[j])
+		})
+
+		ordered := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range withFutureReset {
+			ordered = append(ordered, candidate.candidate)
+		}
+		return append(ordered, fallback...)
+	}
+
+	if len(plan.candidates) == 0 {
+		return nil
+	}
+	if !req.RequireCompact {
+		return orderPool(plan.candidates)
+	}
+
+	// Compact-capable accounts must keep their compatibility tier ahead of
+	// unknown accounts; expiry ordering applies within each safe tier.
+	supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
+	unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
+	for _, candidate := range plan.candidates {
+		switch openAICompactSupportTier(candidate.account) {
+		case 2:
+			supported = append(supported, candidate)
+		case 1:
+			unknown = append(unknown, candidate)
+		}
+	}
+	selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
+	selectionOrder = append(selectionOrder, orderPool(supported)...)
+	selectionOrder = append(selectionOrder, orderPool(unknown)...)
+	if len(plan.staleSnapshotCompactRetry) > 0 && s != nil && s.service != nil && s.service.schedulerSnapshot != nil {
+		selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
+	}
+	return selectionOrder
 }
 
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
@@ -1892,6 +2015,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled:                        cached.enabled,
 				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
+				resetWindowMode:                cached.resetWindowMode,
 				lbTopKOverride:                 cached.lbTopKOverride,
 				weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 			}
@@ -1907,6 +2031,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					enabled:                        cached.enabled,
 					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
 					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
+					resetWindowMode:                cached.resetWindowMode,
 					lbTopKOverride:                 cached.lbTopKOverride,
 					weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 				}, nil
@@ -1918,6 +2043,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		enabled := false
 		stickyWeightedEnabled := false
 		subscriptionPriorityEnabled := false
+		resetWindowMode := openAIAdvancedSchedulerResetWindowModeShort
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
 		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
@@ -1930,6 +2056,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
+				resetWindowMode = openAIAdvancedSchedulerResetWindowModeFromRaw(values[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(values)
 			} else {
@@ -1947,6 +2074,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
+				resetWindowMode = openAIAdvancedSchedulerResetWindowModeFromRaw(fallbackValues[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
 			}
@@ -1958,6 +2086,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                        enabled,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
+			resetWindowMode:                resetWindowMode,
 			lbTopKOverride:                 lbTopKOverride,
 			weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
 			expiresAt:                      time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
@@ -1968,6 +2097,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                        enabled,
 			stickyWeightedEnabled:          stickyWeightedEnabled,
 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
+			resetWindowMode:                resetWindowMode,
 			lbTopKOverride:                 lbTopKOverride,
 			weightOverrides:                weightOverrides,
 		}, nil
@@ -2000,6 +2130,14 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
 	return settings.enabled && settings.subscriptionPriorityEnabled
 }
 
+func (s *OpenAIGatewayService) openAIAdvancedSchedulerResetWindowMode(ctx context.Context) openAIAdvancedSchedulerResetWindowMode {
+	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	if !settings.enabled {
+		return openAIAdvancedSchedulerResetWindowModeShort
+	}
+	return settings.resetWindowMode
+}
+
 func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 	keys := []string{
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled,
@@ -2007,6 +2145,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		SettingKeyOpenAIAdvancedSchedulerResetWindowMode,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
 	}
 	for _, spec := range openAIAdvancedSchedulerWeightOverrideSpecs() {
@@ -2740,12 +2879,13 @@ func (s *RateLimitService) BuildOpenAIAccountSchedulerScoreSnapshot(
 	if s != nil {
 		gateway.cfg = s.cfg
 	}
-	return buildOpenAIAccountSchedulerScoreSnapshot(
+	return buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
 		accounts,
 		loadMap,
 		gateway.openAIWSSchedulerWeightsForRequest(ctx),
 		gateway.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx),
 		gateway.openAIOAuthSchedulingRateMultiplier(ctx),
+		gateway.openAIAdvancedSchedulerResetWindowMode(ctx),
 	)
 }
 
@@ -2763,6 +2903,24 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
 	weights GatewayOpenAIWSSchedulerScoreWeightsView,
 	stickyWeightedEnabled bool,
 	oauthSchedulingRateMultiplier *float64,
+) map[int64]OpenAIAccountSchedulerScoreSnapshot {
+	return buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
+		accounts,
+		loadMap,
+		weights,
+		stickyWeightedEnabled,
+		oauthSchedulingRateMultiplier,
+		openAIAdvancedSchedulerResetWindowModeShort,
+	)
+}
+
+func buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
+	accounts []*Account,
+	loadMap map[int64]*AccountLoadInfo,
+	weights GatewayOpenAIWSSchedulerScoreWeightsView,
+	stickyWeightedEnabled bool,
+	oauthSchedulingRateMultiplier *float64,
+	resetWindowMode openAIAdvancedSchedulerResetWindowMode,
 ) map[int64]OpenAIAccountSchedulerScoreSnapshot {
 	if len(accounts) == 0 {
 		return nil
@@ -2817,7 +2975,7 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
 	}
 	if weights.Reset > 0 {
 		for _, candidate := range candidates {
-			end, ok := openAISchedulingResetWindowEnd(candidate.account, now)
+			end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now)
 			if !ok {
 				continue
 			}
@@ -2848,7 +3006,7 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
 		ttftFactor := 0.5
 		resetFactor := 0.0
 		if weights.Reset > 0 && hasResetSample {
-			if end, ok := openAISchedulingResetWindowEnd(candidate.account, now); ok {
+			if end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now); ok {
 				if maxResetRemaining > minResetRemaining {
 					resetFactor = 1 - clamp01((end.Sub(now).Seconds()-minResetRemaining)/(maxResetRemaining-minResetRemaining))
 				} else {
@@ -3116,7 +3274,28 @@ func openAICanonicalQuotaWindows(extra map[string]any, now time.Time) (window5h,
 }
 
 func openAISchedulingResetWindowEnd(account *Account, now time.Time) (time.Time, bool) {
+	return openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeShort, now)
+}
+
+func openAISchedulingResetWindowEndForMode(account *Account, mode openAIAdvancedSchedulerResetWindowMode, now time.Time) (time.Time, bool) {
 	if account == nil {
+		return time.Time{}, false
+	}
+	if mode.usesLongQuotaWindow() {
+		// codex_7d is the canonical secondary window name. The actual window may
+		// be 7 days, 30 days, or a future long duration, so only reject an
+		// explicitly recorded short (5h-or-less) duration. Older snapshots that
+		// predate the duration field remain usable.
+		if durationRaw, recorded := account.Extra["codex_7d_window_minutes"]; recorded {
+			// A present but zero or unparsable value is not a reliable long-window
+			// snapshot. Only an absent duration gets the legacy compatibility path.
+			if duration := parseExtraInt(durationRaw); duration <= 360 {
+				return time.Time{}, false
+			}
+		}
+		if end, ok := openAICodexWindowResetAt(account.Extra, "7d"); ok && now.Before(end) {
+			return end, true
+		}
 		return time.Time{}, false
 	}
 	if end, ok := openAICodexWindowResetAt(account.Extra, "5h"); ok && now.Before(end) {
