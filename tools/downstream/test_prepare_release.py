@@ -90,6 +90,22 @@ class PrepareReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "official vX.Y.Z"):
             prepare(self.repo, "main", "main;invalid", self.source)
 
+    def test_stages_allowlisted_docs_even_when_upstream_ignores_them(self):
+        (self.repo / ".gitignore").write_text("docs/\n")
+        self.commit("upstream ignores docs")
+        git(self.repo, "tag", "v1.2.0")
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs/maintenance.md").write_text("custom release instructions\n")
+        git(self.repo, "add", "--force", "docs/maintenance.md")
+        self.manifest["maintenance_paths"].append("docs/maintenance.md")
+        self.write_manifest()
+        self.commit("include maintenance documentation")
+        result = prepare(self.repo, "v1.2.0", "v1.2.0", "main")
+        self.assertEqual(
+            git(self.repo, "show", result["candidate_sha"] + ":docs/maintenance.md"),
+            b"custom release instructions\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
