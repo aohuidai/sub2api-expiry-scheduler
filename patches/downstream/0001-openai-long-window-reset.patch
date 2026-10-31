@@ -1,0 +1,1001 @@
+diff --git a/backend/internal/handler/admin/setting_handler.go b/backend/internal/handler/admin/setting_handler.go
+index cca3b17f8..efa8e8839 100644
+--- a/backend/internal/handler/admin/setting_handler.go
++++ b/backend/internal/handler/admin/setting_handler.go
+@@ -323,6 +323,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
+ 		OpenAIAdvancedSchedulerEnabled:                         settings.OpenAIAdvancedSchedulerEnabled,
+ 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+ 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
++		OpenAIAdvancedSchedulerResetWindowMode:                 settings.OpenAIAdvancedSchedulerResetWindowMode,
+ 		OpenAIAdvancedSchedulerLBTopK:                          settings.OpenAIAdvancedSchedulerLBTopK,
+ 		OpenAIAdvancedSchedulerWeightPriority:                  settings.OpenAIAdvancedSchedulerWeightPriority,
+ 		OpenAIAdvancedSchedulerWeightLoad:                      settings.OpenAIAdvancedSchedulerWeightLoad,
+diff --git a/backend/internal/handler/admin/setting_handler_audit.go b/backend/internal/handler/admin/setting_handler_audit.go
+index 81e48f677..711f5ebdc 100644
+--- a/backend/internal/handler/admin/setting_handler_audit.go
++++ b/backend/internal/handler/admin/setting_handler_audit.go
+@@ -524,6 +524,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
+ 	if before.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled != after.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled {
+ 		changed = append(changed, "openai_advanced_scheduler_subscription_priority_enabled")
+ 	}
++	if before.OpenAIAdvancedSchedulerResetWindowMode != after.OpenAIAdvancedSchedulerResetWindowMode {
++		changed = append(changed, "openai_advanced_scheduler_reset_window_mode")
++	}
+ 	if before.OpenAIAdvancedSchedulerLBTopK != after.OpenAIAdvancedSchedulerLBTopK {
+ 		changed = append(changed, "openai_advanced_scheduler_lb_top_k")
+ 	}
+diff --git a/backend/internal/handler/admin/setting_handler_auth_source_defaults_test.go b/backend/internal/handler/admin/setting_handler_auth_source_defaults_test.go
+index 5628084ec..5c1e93ccd 100644
+--- a/backend/internal/handler/admin/setting_handler_auth_source_defaults_test.go
++++ b/backend/internal/handler/admin/setting_handler_auth_source_defaults_test.go
+@@ -225,6 +225,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
+ 		"openai_advanced_scheduler_enabled":                       true,
+ 		"openai_oauth_scheduling_rate_multiplier":                 0.05,
+ 		"openai_advanced_scheduler_subscription_priority_enabled": true,
++		"openai_advanced_scheduler_reset_window_mode":             "long",
+ 	}
+ 	rawBody, err := json.Marshal(body)
+ 	require.NoError(t, err)
+@@ -244,6 +245,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
+ 	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
+ 	require.Equal(t, "0.05", repo.values[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier])
+ 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
++	require.Equal(t, "long", repo.values[service.SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
+ 
+ 	var resp response.Response
+ 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+@@ -256,6 +258,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
+ 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
+ 	require.Equal(t, 0.05, data["openai_oauth_scheduling_rate_multiplier"])
+ 	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
++	require.Equal(t, "long", data["openai_advanced_scheduler_reset_window_mode"])
+ }
+ 
+ func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {
+diff --git a/backend/internal/handler/admin/setting_handler_update.go b/backend/internal/handler/admin/setting_handler_update.go
+index 0947c43a5..4b3795c4a 100644
+--- a/backend/internal/handler/admin/setting_handler_update.go
++++ b/backend/internal/handler/admin/setting_handler_update.go
+@@ -280,6 +280,7 @@ type UpdateSettingsRequest struct {
+ 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
+ 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
+ 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled *bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
++	OpenAIAdvancedSchedulerResetWindowMode             *string  `json:"openai_advanced_scheduler_reset_window_mode"`
+ 	OpenAIAdvancedSchedulerLBTopK                      *string  `json:"openai_advanced_scheduler_lb_top_k"`
+ 	OpenAIAdvancedSchedulerWeightPriority              *string  `json:"openai_advanced_scheduler_weight_priority"`
+ 	OpenAIAdvancedSchedulerWeightLoad                  *string  `json:"openai_advanced_scheduler_weight_load"`
+@@ -1871,6 +1872,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
+ 			}
+ 			return previousSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled
+ 		}(),
++		OpenAIAdvancedSchedulerResetWindowMode:        stringSetting(req.OpenAIAdvancedSchedulerResetWindowMode, previousSettings.OpenAIAdvancedSchedulerResetWindowMode),
+ 		OpenAIAdvancedSchedulerLBTopK:                 stringSetting(req.OpenAIAdvancedSchedulerLBTopK, previousSettings.OpenAIAdvancedSchedulerLBTopK),
+ 		OpenAIAdvancedSchedulerWeightPriority:         stringSetting(req.OpenAIAdvancedSchedulerWeightPriority, previousSettings.OpenAIAdvancedSchedulerWeightPriority),
+ 		OpenAIAdvancedSchedulerWeightLoad:             stringSetting(req.OpenAIAdvancedSchedulerWeightLoad, previousSettings.OpenAIAdvancedSchedulerWeightLoad),
+@@ -2375,6 +2377,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
+ 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
+ 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+ 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     updatedSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
++		OpenAIAdvancedSchedulerResetWindowMode:                 updatedSettings.OpenAIAdvancedSchedulerResetWindowMode,
+ 		OpenAIAdvancedSchedulerLBTopK:                          updatedSettings.OpenAIAdvancedSchedulerLBTopK,
+ 		OpenAIAdvancedSchedulerWeightPriority:                  updatedSettings.OpenAIAdvancedSchedulerWeightPriority,
+ 		OpenAIAdvancedSchedulerWeightLoad:                      updatedSettings.OpenAIAdvancedSchedulerWeightLoad,
+diff --git a/backend/internal/handler/dto/settings.go b/backend/internal/handler/dto/settings.go
+index 96dcc82ec..d1282c0bb 100644
+--- a/backend/internal/handler/dto/settings.go
++++ b/backend/internal/handler/dto/settings.go
+@@ -244,6 +244,7 @@ type SystemSettings struct {
+ 	OpenAIAdvancedSchedulerEnabled                         bool     `json:"openai_advanced_scheduler_enabled"`
+ 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool     `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
+ 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool     `json:"openai_advanced_scheduler_subscription_priority_enabled"`
++	OpenAIAdvancedSchedulerResetWindowMode                 string   `json:"openai_advanced_scheduler_reset_window_mode"`
+ 	OpenAIAdvancedSchedulerLBTopK                          string   `json:"openai_advanced_scheduler_lb_top_k"`
+ 	OpenAIAdvancedSchedulerWeightPriority                  string   `json:"openai_advanced_scheduler_weight_priority"`
+ 	OpenAIAdvancedSchedulerWeightLoad                      string   `json:"openai_advanced_scheduler_weight_load"`
+diff --git a/backend/internal/server/api_contract_test.go b/backend/internal/server/api_contract_test.go
+index 4e3efb5cf..569ca4a9c 100644
+--- a/backend/internal/server/api_contract_test.go
++++ b/backend/internal/server/api_contract_test.go
+@@ -928,6 +928,7 @@ func TestAPIContracts(t *testing.T) {
+ 					"openai_advanced_scheduler_enabled": true,
+ 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
+ 					"openai_advanced_scheduler_subscription_priority_enabled": false,
++					"openai_advanced_scheduler_reset_window_mode": "short",
+ 					"openai_advanced_scheduler_lb_top_k": "",
+ 					"openai_advanced_scheduler_weight_priority": "",
+ 					"openai_advanced_scheduler_weight_load": "",
+@@ -1252,6 +1253,7 @@ func TestAPIContracts(t *testing.T) {
+ 					"openai_advanced_scheduler_enabled": false,
+ 					"openai_advanced_scheduler_sticky_weighted_enabled": false,
+ 					"openai_advanced_scheduler_subscription_priority_enabled": false,
++					"openai_advanced_scheduler_reset_window_mode": "short",
+ 					"openai_advanced_scheduler_lb_top_k": "",
+ 					"openai_advanced_scheduler_weight_priority": "",
+ 					"openai_advanced_scheduler_weight_load": "",
+diff --git a/backend/internal/service/domain_constants.go b/backend/internal/service/domain_constants.go
+index ad9e63d3c..7426fad9c 100644
+--- a/backend/internal/service/domain_constants.go
++++ b/backend/internal/service/domain_constants.go
+@@ -646,17 +646,19 @@ const (
+ 	SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled = "openai_advanced_scheduler_sticky_weighted_enabled"
+ 	// SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled OpenAI 高级调度下是否优先使用订阅账号池。
+ 	SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled = "openai_advanced_scheduler_subscription_priority_enabled"
+-	SettingKeyOpenAIAdvancedSchedulerLBTopK                      = "openai_advanced_scheduler_lb_top_k"
+-	SettingKeyOpenAIAdvancedSchedulerWeightPriority              = "openai_advanced_scheduler_weight_priority"
+-	SettingKeyOpenAIAdvancedSchedulerWeightLoad                  = "openai_advanced_scheduler_weight_load"
+-	SettingKeyOpenAIAdvancedSchedulerWeightQueue                 = "openai_advanced_scheduler_weight_queue"
+-	SettingKeyOpenAIAdvancedSchedulerWeightErrorRate             = "openai_advanced_scheduler_weight_error_rate"
+-	SettingKeyOpenAIAdvancedSchedulerWeightTTFT                  = "openai_advanced_scheduler_weight_ttft"
+-	SettingKeyOpenAIAdvancedSchedulerWeightReset                 = "openai_advanced_scheduler_weight_reset"
+-	SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom         = "openai_advanced_scheduler_weight_quota_headroom"
+-	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost          = "openai_advanced_scheduler_weight_upstream_cost"
+-	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse      = "openai_advanced_scheduler_weight_previous_response"
+-	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
++	// SettingKeyOpenAIAdvancedSchedulerResetWindowMode controls which Codex quota window contributes to reset scoring.
++	SettingKeyOpenAIAdvancedSchedulerResetWindowMode        = "openai_advanced_scheduler_reset_window_mode"
++	SettingKeyOpenAIAdvancedSchedulerLBTopK                 = "openai_advanced_scheduler_lb_top_k"
++	SettingKeyOpenAIAdvancedSchedulerWeightPriority         = "openai_advanced_scheduler_weight_priority"
++	SettingKeyOpenAIAdvancedSchedulerWeightLoad             = "openai_advanced_scheduler_weight_load"
++	SettingKeyOpenAIAdvancedSchedulerWeightQueue            = "openai_advanced_scheduler_weight_queue"
++	SettingKeyOpenAIAdvancedSchedulerWeightErrorRate        = "openai_advanced_scheduler_weight_error_rate"
++	SettingKeyOpenAIAdvancedSchedulerWeightTTFT             = "openai_advanced_scheduler_weight_ttft"
++	SettingKeyOpenAIAdvancedSchedulerWeightReset            = "openai_advanced_scheduler_weight_reset"
++	SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom    = "openai_advanced_scheduler_weight_quota_headroom"
++	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost     = "openai_advanced_scheduler_weight_upstream_cost"
++	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse = "openai_advanced_scheduler_weight_previous_response"
++	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky    = "openai_advanced_scheduler_weight_session_sticky"
+ 
+ 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
+ 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
+diff --git a/backend/internal/service/openai_account_scheduler.go b/backend/internal/service/openai_account_scheduler.go
+index 2cbf1211f..1507ad781 100644
+--- a/backend/internal/service/openai_account_scheduler.go
++++ b/backend/internal/service/openai_account_scheduler.go
+@@ -43,12 +43,48 @@ const (
+ 	defaultOpenAIOAuthSchedulingRateMultiplier = 1.0
+ )
+ 
++type openAIAdvancedSchedulerResetWindowMode string
++
++const (
++	// short preserves the upstream reset-score behavior: Codex 5h, then the
++	// legacy session window.
++	openAIAdvancedSchedulerResetWindowModeShort openAIAdvancedSchedulerResetWindowMode = "short"
++	// long scores the canonical Codex secondary quota window. Its actual
++	// duration is supplied by the account snapshot and may be 7d, 30d, or
++	// another provider-defined long window.
++	openAIAdvancedSchedulerResetWindowModeLong openAIAdvancedSchedulerResetWindowMode = "long"
++	// long_strict makes the recorded long reset timestamp the first ordering
++	// criterion for new load-balanced requests. It still falls back when the
++	// earliest account has no usable slot or is no longer schedulable.
++	openAIAdvancedSchedulerResetWindowModeLongStrict openAIAdvancedSchedulerResetWindowMode = "long_strict"
++)
++
++func openAIAdvancedSchedulerResetWindowModeFromRaw(raw string) openAIAdvancedSchedulerResetWindowMode {
++	switch strings.ToLower(strings.TrimSpace(raw)) {
++	case string(openAIAdvancedSchedulerResetWindowModeLong):
++		return openAIAdvancedSchedulerResetWindowModeLong
++	case string(openAIAdvancedSchedulerResetWindowModeLongStrict):
++		return openAIAdvancedSchedulerResetWindowModeLongStrict
++	}
++	return openAIAdvancedSchedulerResetWindowModeShort
++}
++
++func (m openAIAdvancedSchedulerResetWindowMode) usesLongQuotaWindow() bool {
++	return m == openAIAdvancedSchedulerResetWindowModeLong ||
++		m == openAIAdvancedSchedulerResetWindowModeLongStrict
++}
++
++func (m openAIAdvancedSchedulerResetWindowMode) isStrictLongQuotaWindow() bool {
++	return m == openAIAdvancedSchedulerResetWindowModeLongStrict
++}
++
+ type cachedOpenAIAdvancedSchedulerSetting struct {
+ 	lowUpstreamRatePriorityEnabled bool
+ 	oauthSchedulingRateMultiplier  *float64
+ 	enabled                        bool
+ 	stickyWeightedEnabled          bool
+ 	subscriptionPriorityEnabled    bool
++	resetWindowMode                openAIAdvancedSchedulerResetWindowMode
+ 	lbTopKOverride                 int
+ 	weightOverrides                map[string]float64
+ 	expiresAt                      int64
+@@ -60,6 +96,7 @@ type openAIAdvancedSchedulerRuntimeSettings struct {
+ 	enabled                        bool
+ 	stickyWeightedEnabled          bool
+ 	subscriptionPriorityEnabled    bool
++	resetWindowMode                openAIAdvancedSchedulerResetWindowMode
+ 	lbTopKOverride                 int
+ 	weightOverrides                map[string]float64
+ }
+@@ -147,6 +184,7 @@ type openAIAccountLoadPlan struct {
+ 	topK                      int
+ 	loadSkew                  float64
+ 	includeOverflowFallback   bool
++	strictLongReset           bool
+ }
+ 
+ type openAIAccountLoadSelectionAttempt struct {
+@@ -961,14 +999,16 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
+ 		}
+ 	}
+ 
+-	// Reset 因子（use-it-or-lose-it）：优先读取 Codex 5h 重置时间，回退到会话窗口。
++	// Reset 因子（use-it-or-lose-it）：可按设置读取短窗口或实际的长额度窗口。
+ 	// 剩余时间越短 → 因子越接近 1（越早重置越优先用尽）。无活跃窗口的账号因子为 0。
+ 	// 仅在 weights.Reset > 0 时计算，默认关闭不影响原有行为。
+ 	minResetRemaining, maxResetRemaining := 0.0, 0.0
+ 	hasResetSample := false
++	resetWindowMode := s.service.openAIAdvancedSchedulerResetWindowMode(ctx)
++	plan.strictLongReset = resetWindowMode.isStrictLongQuotaWindow()
+ 	if weights.Reset > 0 {
+ 		for _, candidate := range candidates {
+-			end, ok := openAISchedulingResetWindowEnd(candidate.account, now)
++			end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now)
+ 			if !ok {
+ 				continue
+ 			}
+@@ -1002,7 +1042,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
+ 		}
+ 		resetFactor := 0.0
+ 		if weights.Reset > 0 && hasResetSample {
+-			if end, ok := openAISchedulingResetWindowEnd(item.account, now); ok {
++			if end, ok := openAISchedulingResetWindowEndForMode(item.account, resetWindowMode, now); ok {
+ 				if maxResetRemaining > minResetRemaining {
+ 					resetFactor = 1 - clamp01((end.Sub(now).Seconds()-minResetRemaining)/(maxResetRemaining-minResetRemaining))
+ 				} else {
+@@ -1055,6 +1095,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
+ 	req OpenAIAccountScheduleRequest,
+ 	plan openAIAccountLoadPlan,
+ ) []openAIAccountCandidateScore {
++	if plan.strictLongReset {
++		return s.buildOpenAIStrictLongResetSelectionOrder(req, plan)
++	}
++
+ 	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+ 		if len(pool) == 0 || plan.topK <= 0 {
+ 			return nil
+@@ -1128,6 +1172,85 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
+ 	return buildSelectionOrder(plan.candidates)
+ }
+ 
++// buildOpenAIStrictLongResetSelectionOrder implements the explicit
++// use-it-or-lose-it policy. Future long-window reset timestamps form the
++// primary pool and are tried in chronological order. Candidates without a
++// usable long reset timestamp remain a deterministic fallback so one stale
++// quota snapshot cannot make a group unavailable.
++func (s *defaultOpenAIAccountScheduler) buildOpenAIStrictLongResetSelectionOrder(
++	req OpenAIAccountScheduleRequest,
++	plan openAIAccountLoadPlan,
++) []openAIAccountCandidateScore {
++	type resetCandidate struct {
++		candidate openAIAccountCandidateScore
++		resetAt   time.Time
++	}
++
++	orderPool := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
++		if len(pool) == 0 {
++			return nil
++		}
++
++		now := time.Now()
++		withFutureReset := make([]resetCandidate, 0, len(pool))
++		fallback := make([]openAIAccountCandidateScore, 0, len(pool))
++		for _, candidate := range pool {
++			if resetAt, ok := openAISchedulingResetWindowEndForMode(
++				candidate.account,
++				openAIAdvancedSchedulerResetWindowModeLongStrict,
++				now,
++			); ok {
++				withFutureReset = append(withFutureReset, resetCandidate{candidate: candidate, resetAt: resetAt})
++				continue
++			}
++			fallback = append(fallback, candidate)
++		}
++
++		sort.Slice(withFutureReset, func(i, j int) bool {
++			if !withFutureReset[i].resetAt.Equal(withFutureReset[j].resetAt) {
++				return withFutureReset[i].resetAt.Before(withFutureReset[j].resetAt)
++			}
++			return isOpenAIAccountCandidateBetter(withFutureReset[i].candidate, withFutureReset[j].candidate)
++		})
++		sort.Slice(fallback, func(i, j int) bool {
++			return isOpenAIAccountCandidateBetter(fallback[i], fallback[j])
++		})
++
++		ordered := make([]openAIAccountCandidateScore, 0, len(pool))
++		for _, candidate := range withFutureReset {
++			ordered = append(ordered, candidate.candidate)
++		}
++		return append(ordered, fallback...)
++	}
++
++	if len(plan.candidates) == 0 {
++		return nil
++	}
++	if !req.RequireCompact {
++		return orderPool(plan.candidates)
++	}
++
++	// Compact-capable accounts must keep their compatibility tier ahead of
++	// unknown accounts; expiry ordering applies within each safe tier.
++	supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
++	unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
++	for _, candidate := range plan.candidates {
++		switch openAICompactSupportTier(candidate.account) {
++		case 2:
++			supported = append(supported, candidate)
++		case 1:
++			unknown = append(unknown, candidate)
++		}
++	}
++	selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
++	selectionOrder = append(selectionOrder, orderPool(supported)...)
++	selectionOrder = append(selectionOrder, orderPool(unknown)...)
++	if len(plan.staleSnapshotCompactRetry) > 0 && s != nil && s.service != nil && s.service.schedulerSnapshot != nil {
++		selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
++	}
++	return selectionOrder
++}
++
+ func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+ 	if len(pool) == 0 {
+ 		return nil
+@@ -1892,6 +2015,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 				enabled:                        cached.enabled,
+ 				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
+ 				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
++				resetWindowMode:                cached.resetWindowMode,
+ 				lbTopKOverride:                 cached.lbTopKOverride,
+ 				weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+ 			}
+@@ -1907,6 +2031,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 					enabled:                        cached.enabled,
+ 					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
+ 					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
++					resetWindowMode:                cached.resetWindowMode,
+ 					lbTopKOverride:                 cached.lbTopKOverride,
+ 					weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+ 				}, nil
+@@ -1918,6 +2043,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 		enabled := false
+ 		stickyWeightedEnabled := false
+ 		subscriptionPriorityEnabled := false
++		resetWindowMode := openAIAdvancedSchedulerResetWindowModeShort
+ 		lbTopKOverride := 0
+ 		weightOverrides := map[string]float64{}
+ 		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
+@@ -1930,6 +2056,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
+ 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
+ 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
++				resetWindowMode = openAIAdvancedSchedulerResetWindowModeFromRaw(values[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
+ 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
+ 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(values)
+ 			} else {
+@@ -1947,6 +2074,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
+ 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
+ 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
++				resetWindowMode = openAIAdvancedSchedulerResetWindowModeFromRaw(fallbackValues[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
+ 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
+ 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
+ 			}
+@@ -1958,6 +2086,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 			enabled:                        enabled,
+ 			stickyWeightedEnabled:          stickyWeightedEnabled,
+ 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
++			resetWindowMode:                resetWindowMode,
+ 			lbTopKOverride:                 lbTopKOverride,
+ 			weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
+ 			expiresAt:                      time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
+@@ -1968,6 +2097,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
+ 			enabled:                        enabled,
+ 			stickyWeightedEnabled:          stickyWeightedEnabled,
+ 			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
++			resetWindowMode:                resetWindowMode,
+ 			lbTopKOverride:                 lbTopKOverride,
+ 			weightOverrides:                weightOverrides,
+ 		}, nil
+@@ -2000,6 +2130,14 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
+ 	return settings.enabled && settings.subscriptionPriorityEnabled
+ }
+ 
++func (s *OpenAIGatewayService) openAIAdvancedSchedulerResetWindowMode(ctx context.Context) openAIAdvancedSchedulerResetWindowMode {
++	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
++	if !settings.enabled {
++		return openAIAdvancedSchedulerResetWindowModeShort
++	}
++	return settings.resetWindowMode
++}
++
+ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
+ 	keys := []string{
+ 		SettingKeyOpenAILowUpstreamRatePriorityEnabled,
+@@ -2007,6 +2145,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
+ 		openAIAdvancedSchedulerSettingKey,
+ 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
+ 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
++		SettingKeyOpenAIAdvancedSchedulerResetWindowMode,
+ 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
+ 	}
+ 	for _, spec := range openAIAdvancedSchedulerWeightOverrideSpecs() {
+@@ -2740,12 +2879,13 @@ func (s *RateLimitService) BuildOpenAIAccountSchedulerScoreSnapshot(
+ 	if s != nil {
+ 		gateway.cfg = s.cfg
+ 	}
+-	return buildOpenAIAccountSchedulerScoreSnapshot(
++	return buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
+ 		accounts,
+ 		loadMap,
+ 		gateway.openAIWSSchedulerWeightsForRequest(ctx),
+ 		gateway.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx),
+ 		gateway.openAIOAuthSchedulingRateMultiplier(ctx),
++		gateway.openAIAdvancedSchedulerResetWindowMode(ctx),
+ 	)
+ }
+ 
+@@ -2763,6 +2903,24 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
+ 	weights GatewayOpenAIWSSchedulerScoreWeightsView,
+ 	stickyWeightedEnabled bool,
+ 	oauthSchedulingRateMultiplier *float64,
++) map[int64]OpenAIAccountSchedulerScoreSnapshot {
++	return buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
++		accounts,
++		loadMap,
++		weights,
++		stickyWeightedEnabled,
++		oauthSchedulingRateMultiplier,
++		openAIAdvancedSchedulerResetWindowModeShort,
++	)
++}
++
++func buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
++	accounts []*Account,
++	loadMap map[int64]*AccountLoadInfo,
++	weights GatewayOpenAIWSSchedulerScoreWeightsView,
++	stickyWeightedEnabled bool,
++	oauthSchedulingRateMultiplier *float64,
++	resetWindowMode openAIAdvancedSchedulerResetWindowMode,
+ ) map[int64]OpenAIAccountSchedulerScoreSnapshot {
+ 	if len(accounts) == 0 {
+ 		return nil
+@@ -2817,7 +2975,7 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
+ 	}
+ 	if weights.Reset > 0 {
+ 		for _, candidate := range candidates {
+-			end, ok := openAISchedulingResetWindowEnd(candidate.account, now)
++			end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now)
+ 			if !ok {
+ 				continue
+ 			}
+@@ -2848,7 +3006,7 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
+ 		ttftFactor := 0.5
+ 		resetFactor := 0.0
+ 		if weights.Reset > 0 && hasResetSample {
+-			if end, ok := openAISchedulingResetWindowEnd(candidate.account, now); ok {
++			if end, ok := openAISchedulingResetWindowEndForMode(candidate.account, resetWindowMode, now); ok {
+ 				if maxResetRemaining > minResetRemaining {
+ 					resetFactor = 1 - clamp01((end.Sub(now).Seconds()-minResetRemaining)/(maxResetRemaining-minResetRemaining))
+ 				} else {
+@@ -3116,9 +3274,30 @@ func openAICanonicalQuotaWindows(extra map[string]any, now time.Time) (window5h,
+ }
+ 
+ func openAISchedulingResetWindowEnd(account *Account, now time.Time) (time.Time, bool) {
++	return openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeShort, now)
++}
++
++func openAISchedulingResetWindowEndForMode(account *Account, mode openAIAdvancedSchedulerResetWindowMode, now time.Time) (time.Time, bool) {
+ 	if account == nil {
+ 		return time.Time{}, false
+ 	}
++	if mode.usesLongQuotaWindow() {
++		// codex_7d is the canonical secondary window name. The actual window may
++		// be 7 days, 30 days, or a future long duration, so only reject an
++		// explicitly recorded short (5h-or-less) duration. Older snapshots that
++		// predate the duration field remain usable.
++		if durationRaw, recorded := account.Extra["codex_7d_window_minutes"]; recorded {
++			// A present but zero or unparsable value is not a reliable long-window
++			// snapshot. Only an absent duration gets the legacy compatibility path.
++			if duration := parseExtraInt(durationRaw); duration <= 360 {
++				return time.Time{}, false
++			}
++		}
++		if end, ok := openAICodexWindowResetAt(account.Extra, "7d"); ok && now.Before(end) {
++			return end, true
++		}
++		return time.Time{}, false
++	}
+ 	if end, ok := openAICodexWindowResetAt(account.Extra, "5h"); ok && now.Before(end) {
+ 		return end, true
+ 	}
+diff --git a/backend/internal/service/openai_account_scheduler_canonical_quota_test.go b/backend/internal/service/openai_account_scheduler_canonical_quota_test.go
+index a7cc8116d..0193131cd 100644
+--- a/backend/internal/service/openai_account_scheduler_canonical_quota_test.go
++++ b/backend/internal/service/openai_account_scheduler_canonical_quota_test.go
+@@ -139,3 +139,51 @@ func TestOpenAISchedulingResetWindowEnd(t *testing.T) {
+ 	_, ok = openAISchedulingResetWindowEnd(nil, now)
+ 	require.False(t, ok)
+ }
++
++func TestOpenAISchedulingResetWindowEndForLongMode(t *testing.T) {
++	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
++	reset := now.Add(30 * 24 * time.Hour)
++	account := &Account{Extra: map[string]any{
++		"codex_7d_window_minutes": 43200,
++		"codex_7d_reset_at":       reset.Format(time.RFC3339),
++	}}
++
++	end, ok := openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
++	require.True(t, ok)
++	require.Equal(t, reset, end)
++
++	account.Extra["codex_7d_window_minutes"] = 300
++	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
++	require.False(t, ok)
++
++	account.Extra["codex_7d_window_minutes"] = 0
++	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
++	require.False(t, ok)
++
++	account.Extra["codex_7d_window_minutes"] = "invalid"
++	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
++	require.False(t, ok)
++
++	delete(account.Extra, "codex_7d_window_minutes")
++	end, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
++	require.True(t, ok, "historical snapshots without a duration remain usable")
++	require.Equal(t, reset, end)
++}
++
++func TestOpenAISchedulerLongResetScoresMatchSnapshot(t *testing.T) {
++	now := time.Now()
++	accounts := []*Account{
++		{ID: 1, Extra: map[string]any{"codex_7d_window_minutes": 43200, "codex_7d_reset_at": now.Add(24 * time.Hour).Format(time.RFC3339)}},
++		{ID: 2, Extra: map[string]any{"codex_7d_window_minutes": 43200, "codex_7d_reset_at": now.Add(7 * 24 * time.Hour).Format(time.RFC3339)}},
++	}
++	weights := GatewayOpenAIWSSchedulerScoreWeightsView{Reset: 1}
++	snapshots := buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
++		accounts,
++		nil,
++		weights,
++		false,
++		floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier),
++		openAIAdvancedSchedulerResetWindowModeLong,
++	)
++	require.Greater(t, snapshots[1].BaseScore, snapshots[2].BaseScore)
++}
+diff --git a/backend/internal/service/openai_account_scheduler_reset_test.go b/backend/internal/service/openai_account_scheduler_reset_test.go
+index f1270c8ca..4dd1ab9a8 100644
+--- a/backend/internal/service/openai_account_scheduler_reset_test.go
++++ b/backend/internal/service/openai_account_scheduler_reset_test.go
+@@ -86,6 +86,85 @@ func TestBuildOpenAIAccountLoadPlan_ResetWeightIgnoresNilWindow(t *testing.T) {
+ 	require.Greater(t, scores[2], scores[1], "拥有活跃窗口的账号得分高于无窗口账号")
+ }
+ 
++func TestBuildOpenAIAccountLoadPlan_LongResetWindowPrefersSoonestLongQuotaReset(t *testing.T) {
++	resetOpenAIAdvancedSchedulerSettingCacheForTest()
++	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
++
++	now := time.Now()
++	soon := now.Add(24 * time.Hour)
++	later := now.Add(7 * 24 * time.Hour)
++	filtered := []*Account{
++		{ID: 1, Priority: 0, Extra: map[string]any{
++			"codex_7d_window_minutes": 43200,
++			"codex_7d_reset_at":       later.Format(time.RFC3339),
++		}},
++		{ID: 2, Priority: 0, Extra: map[string]any{
++			"codex_7d_window_minutes": 43200,
++			"codex_7d_reset_at":       soon.Format(time.RFC3339),
++		}},
++	}
++	cfg := &config.Config{}
++	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Reset = 5
++	sched := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
++		cfg: cfg,
++		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(
++			"true", "", "", string(openAIAdvancedSchedulerResetWindowModeLong),
++		),
++	}}
++
++	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
++	scores := openAIPlanScores(plan)
++	require.Greater(t, scores[2], scores[1])
++}
++
++func TestBuildOpenAIAccountLoadPlan_StrictLongResetOrdersUsableFutureWindowsBeforeFallback(t *testing.T) {
++	resetOpenAIAdvancedSchedulerSettingCacheForTest()
++	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
++
++	now := time.Now()
++	soon := now.Add(24 * time.Hour)
++	later := now.Add(20 * 24 * time.Hour)
++	stale := now.Add(-time.Hour)
++	filtered := []*Account{
++		{
++			ID: 1, Priority: 0, Extra: map[string]any{
++				"codex_7d_window_minutes": 43200,
++				"codex_7d_reset_at":       later.Format(time.RFC3339),
++			},
++		},
++		{
++			// The higher priority value gives this account a worse normal score.
++			// Strict expiry mode must still try it first because it resets first.
++			ID: 2, Priority: 10, Extra: map[string]any{
++				"codex_7d_window_minutes": 43200,
++				"codex_7d_reset_at":       soon.Format(time.RFC3339),
++			},
++		},
++		{
++			ID: 3, Priority: 0, Extra: map[string]any{
++				"codex_7d_window_minutes": 43200,
++				"codex_7d_reset_at":       stale.Format(time.RFC3339),
++			},
++		},
++	}
++	cfg := &config.Config{}
++	cfg.Gateway.OpenAIWS.LBTopK = 1
++	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
++	sched := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
++		cfg: cfg,
++		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(
++			"true", "", "", string(openAIAdvancedSchedulerResetWindowModeLongStrict),
++		),
++	}}
++
++	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
++	require.True(t, plan.strictLongReset)
++	require.Len(t, plan.selectionOrder, 3)
++	require.Equal(t, int64(2), plan.selectionOrder[0].account.ID)
++	require.Equal(t, int64(1), plan.selectionOrder[1].account.ID)
++	require.Equal(t, int64(3), plan.selectionOrder[2].account.ID)
++}
++
+ func TestOpenAIQuotaHeadroomFactor_PrimaryUsedPercent(t *testing.T) {
+ 	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
+ 	account := &Account{
+diff --git a/backend/internal/service/openai_account_scheduler_test.go b/backend/internal/service/openai_account_scheduler_test.go
+index 6a31e46cc..2762bf82c 100644
+--- a/backend/internal/service/openai_account_scheduler_test.go
++++ b/backend/internal/service/openai_account_scheduler_test.go
+@@ -295,6 +295,9 @@ func newOpenAIAdvancedSchedulerRateLimitService(enabled string, values ...string
+ 	if len(values) > 1 && values[1] != "" {
+ 		repo.values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = values[1]
+ 	}
++	if len(values) > 2 && values[2] != "" {
++		repo.values[SettingKeyOpenAIAdvancedSchedulerResetWindowMode] = values[2]
++	}
+ 	return &RateLimitService{
+ 		settingService: NewSettingService(repo, &config.Config{}),
+ 	}
+@@ -368,6 +371,37 @@ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_DBOverrides
+ 	require.Equal(t, 0.25, weights.Reset)
+ 	require.Equal(t, 12.0, weights.Previous)
+ 	require.Equal(t, 10.0, weights.SessionSticky)
++	require.Equal(t, openAIAdvancedSchedulerResetWindowModeShort, svc.openAIAdvancedSchedulerResetWindowMode(ctx))
++}
++
++func TestOpenAIGatewayService_OpenAIAdvancedSchedulerResetWindowMode(t *testing.T) {
++	resetOpenAIAdvancedSchedulerSettingCacheForTest()
++	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
++
++	cfg := &config.Config{}
++	svc := &OpenAIGatewayService{
++		cfg: cfg,
++		rateLimitService: &RateLimitService{settingService: NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
++			openAIAdvancedSchedulerSettingKey:                "true",
++			SettingKeyOpenAIAdvancedSchedulerResetWindowMode: "long",
++		}}, cfg)},
++	}
++	require.Equal(t, openAIAdvancedSchedulerResetWindowModeLong, svc.openAIAdvancedSchedulerResetWindowMode(context.Background()))
++}
++
++func TestOpenAIGatewayService_OpenAIAdvancedSchedulerStrictLongResetWindowMode(t *testing.T) {
++	resetOpenAIAdvancedSchedulerSettingCacheForTest()
++	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
++
++	cfg := &config.Config{}
++	svc := &OpenAIGatewayService{
++		cfg: cfg,
++		rateLimitService: &RateLimitService{settingService: NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
++			openAIAdvancedSchedulerSettingKey:                "true",
++			SettingKeyOpenAIAdvancedSchedulerResetWindowMode: "long_strict",
++		}}, cfg)},
++	}
++	require.Equal(t, openAIAdvancedSchedulerResetWindowModeLongStrict, svc.openAIAdvancedSchedulerResetWindowMode(context.Background()))
+ }
+ 
+ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_InvalidWeightSumsFallBackToConfig(t *testing.T) {
+diff --git a/backend/internal/service/setting_parse.go b/backend/internal/service/setting_parse.go
+index f93f4b1b3..7cbfc9997 100644
+--- a/backend/internal/service/setting_parse.go
++++ b/backend/internal/service/setting_parse.go
+@@ -257,6 +257,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
+ 		openAIAdvancedSchedulerSettingKey:                            "false",
+ 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
+ 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
++		SettingKeyOpenAIAdvancedSchedulerResetWindowMode:             string(openAIAdvancedSchedulerResetWindowModeShort),
+ 		SettingKeyOpenAIAdvancedSchedulerLBTopK:                      "",
+ 		SettingKeyOpenAIAdvancedSchedulerWeightPriority:              "",
+ 		SettingKeyOpenAIAdvancedSchedulerWeightLoad:                  "",
+@@ -932,6 +933,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
+ 	result.OpenAIAdvancedSchedulerEnabled = settings[openAIAdvancedSchedulerSettingKey] == "true"
+ 	result.OpenAIAdvancedSchedulerStickyWeightedEnabled = settings[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] == "true"
+ 	result.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled = settings[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] == "true"
++	result.OpenAIAdvancedSchedulerResetWindowMode = string(openAIAdvancedSchedulerResetWindowModeFromRaw(settings[SettingKeyOpenAIAdvancedSchedulerResetWindowMode]))
+ 	result.OpenAIAdvancedSchedulerLBTopK = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerLBTopK])
+ 	result.OpenAIAdvancedSchedulerWeightPriority = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightPriority])
+ 	result.OpenAIAdvancedSchedulerWeightLoad = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightLoad])
+@@ -1096,6 +1098,11 @@ func (s *SettingService) normalizeOpenAIAdvancedSchedulerOverrides(settings *Sys
+ 	if rate := settings.OpenAIOAuthSchedulingRateMultiplier; rate != nil && (*rate < 0 || math.IsNaN(*rate) || math.IsInf(*rate, 0)) {
+ 		return infraerrors.BadRequest("INVALID_OPENAI_OAUTH_SCHEDULING_RATE_MULTIPLIER", "OpenAI OAuth scheduling rate multiplier must be a finite non-negative number")
+ 	}
++	resetWindowMode, err := normalizeOpenAIAdvancedSchedulerResetWindowMode(settings.OpenAIAdvancedSchedulerResetWindowMode)
++	if err != nil {
++		return infraerrors.BadRequest("INVALID_OPENAI_ADVANCED_SCHEDULER_RESET_WINDOW_MODE", "openai advanced scheduler reset window mode must be short, long, or long_strict")
++	}
++	settings.OpenAIAdvancedSchedulerResetWindowMode = resetWindowMode
+ 
+ 	lbTopK, err := normalizeOptionalPositiveIntString(settings.OpenAIAdvancedSchedulerLBTopK)
+ 	if err != nil {
+@@ -1145,6 +1152,19 @@ func (s *SettingService) normalizeOpenAIAdvancedSchedulerOverrides(settings *Sys
+ 	return nil
+ }
+ 
++func normalizeOpenAIAdvancedSchedulerResetWindowMode(raw string) (string, error) {
++	switch normalized := strings.ToLower(strings.TrimSpace(raw)); normalized {
++	case "", string(openAIAdvancedSchedulerResetWindowModeShort):
++		return string(openAIAdvancedSchedulerResetWindowModeShort), nil
++	case string(openAIAdvancedSchedulerResetWindowModeLong):
++		return string(openAIAdvancedSchedulerResetWindowModeLong), nil
++	case string(openAIAdvancedSchedulerResetWindowModeLongStrict):
++		return string(openAIAdvancedSchedulerResetWindowModeLongStrict), nil
++	default:
++		return "", fmt.Errorf("unsupported reset window mode %q", raw)
++	}
++}
++
+ func parseOpenAIOAuthSchedulingRateMultiplier(settings map[string]string) *float64 {
+ 	raw, exists := settings[SettingKeyOpenAIOAuthSchedulingRateMultiplier]
+ 	if !exists {
+diff --git a/backend/internal/service/setting_service_update_test.go b/backend/internal/service/setting_service_update_test.go
+index 40619e29e..0bb0dc68c 100644
+--- a/backend/internal/service/setting_service_update_test.go
++++ b/backend/internal/service/setting_service_update_test.go
+@@ -414,6 +414,7 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
+ 		OpenAIAdvancedSchedulerEnabled:                     true,
+ 		OpenAIAdvancedSchedulerStickyWeightedEnabled:       true,
+ 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled: true,
++		OpenAIAdvancedSchedulerResetWindowMode:             " long ",
+ 		OpenAIAdvancedSchedulerLBTopK:                      " 3 ",
+ 		OpenAIAdvancedSchedulerWeightPriority:              "2.50",
+ 		OpenAIAdvancedSchedulerWeightLoad:                  "0",
+@@ -436,6 +437,7 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
+ 	require.Equal(t, "true", repo.updates[openAIAdvancedSchedulerSettingKey])
+ 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled])
+ 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
++	require.Equal(t, "long", repo.updates[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
+ 	require.Equal(t, "3", repo.updates[SettingKeyOpenAIAdvancedSchedulerLBTopK])
+ 	require.Equal(t, "2.5", repo.updates[SettingKeyOpenAIAdvancedSchedulerWeightPriority])
+ 	require.Equal(t, "0", repo.updates[SettingKeyOpenAIAdvancedSchedulerWeightLoad])
+@@ -449,6 +451,21 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
+ 	require.Equal(t, "4", repo.updates[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky])
+ }
+ 
++func TestSettingService_UpdateSettingsRejectsInvalidOpenAIAdvancedSchedulerResetWindowMode(t *testing.T) {
++	repo := &settingUpdateRepoStub{}
++	svc := NewSettingService(repo, &config.Config{})
++	err := svc.UpdateSettings(context.Background(), &SystemSettings{OpenAIAdvancedSchedulerResetWindowMode: "monthly"})
++	require.Error(t, err)
++}
++
++func TestSettingService_UpdateSettingsAcceptsStrictOpenAIAdvancedSchedulerResetWindowMode(t *testing.T) {
++	repo := &settingUpdateRepoStub{}
++	svc := NewSettingService(repo, &config.Config{})
++	err := svc.UpdateSettings(context.Background(), &SystemSettings{OpenAIAdvancedSchedulerResetWindowMode: " long_strict "})
++	require.NoError(t, err)
++	require.Equal(t, "long_strict", repo.updates[SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
++}
++
+ func TestSettingService_UpdateSettingsRejectsInvalidOpenAIOAuthSchedulingRateMultiplier(t *testing.T) {
+ 	repo := &settingUpdateRepoStub{}
+ 	svc := NewSettingService(repo, &config.Config{})
+diff --git a/backend/internal/service/setting_update.go b/backend/internal/service/setting_update.go
+index caf3dd87e..9e317d404 100644
+--- a/backend/internal/service/setting_update.go
++++ b/backend/internal/service/setting_update.go
+@@ -514,6 +514,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
+ 	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
+ 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
+ 	updates[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled)
++	updates[SettingKeyOpenAIAdvancedSchedulerResetWindowMode] = settings.OpenAIAdvancedSchedulerResetWindowMode
+ 	updates[SettingKeyOpenAIAdvancedSchedulerLBTopK] = settings.OpenAIAdvancedSchedulerLBTopK
+ 	updates[SettingKeyOpenAIAdvancedSchedulerWeightPriority] = settings.OpenAIAdvancedSchedulerWeightPriority
+ 	updates[SettingKeyOpenAIAdvancedSchedulerWeightLoad] = settings.OpenAIAdvancedSchedulerWeightLoad
+@@ -758,6 +759,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
+ 		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
+ 		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+ 		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
++		resetWindowMode:                openAIAdvancedSchedulerResetWindowModeFromRaw(settings.OpenAIAdvancedSchedulerResetWindowMode),
+ 		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
+ 		weightOverrides: parseOpenAIAdvancedSchedulerWeightOverrides(map[string]string{
+ 			SettingKeyOpenAIAdvancedSchedulerWeightPriority:         settings.OpenAIAdvancedSchedulerWeightPriority,
+diff --git a/backend/internal/service/settings_view.go b/backend/internal/service/settings_view.go
+index 8535fb6b8..54e74870c 100644
+--- a/backend/internal/service/settings_view.go
++++ b/backend/internal/service/settings_view.go
+@@ -276,6 +276,7 @@ type SystemSettings struct {
+ 	OpenAIAdvancedSchedulerEnabled                         bool
+ 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
+ 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool
++	OpenAIAdvancedSchedulerResetWindowMode                 string
+ 	OpenAIAdvancedSchedulerLBTopK                          string
+ 	OpenAIAdvancedSchedulerWeightPriority                  string
+ 	OpenAIAdvancedSchedulerWeightLoad                      string
+diff --git a/frontend/src/api/admin/settings.ts b/frontend/src/api/admin/settings.ts
+index c760d45f1..0ab713ac9 100644
+--- a/frontend/src/api/admin/settings.ts
++++ b/frontend/src/api/admin/settings.ts
+@@ -700,6 +700,7 @@ export interface SystemSettings {
+   openai_advanced_scheduler_enabled?: boolean;
+   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
+   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
++  openai_advanced_scheduler_reset_window_mode?: string;
+   openai_advanced_scheduler_lb_top_k?: string;
+   openai_advanced_scheduler_weight_priority?: string;
+   openai_advanced_scheduler_weight_load?: string;
+@@ -1024,6 +1025,7 @@ export interface UpdateSettingsRequest {
+   openai_advanced_scheduler_enabled?: boolean;
+   openai_advanced_scheduler_sticky_weighted_enabled?: boolean;
+   openai_advanced_scheduler_subscription_priority_enabled?: boolean;
++  openai_advanced_scheduler_reset_window_mode?: string;
+   openai_advanced_scheduler_lb_top_k?: string;
+   openai_advanced_scheduler_weight_priority?: string;
+   openai_advanced_scheduler_weight_load?: string;
+diff --git a/frontend/src/i18n/locales/en/admin/settings.ts b/frontend/src/i18n/locales/en/admin/settings.ts
+index c056f3925..aeb7309fc 100644
+--- a/frontend/src/i18n/locales/en/admin/settings.ts
++++ b/frontend/src/i18n/locales/en/admin/settings.ts
+@@ -1275,6 +1275,11 @@ export default {
+         stickyWeightedDescription: 'When enabled, previous_response_id and session_hash affinity are scored by the advanced scheduler. When disabled, sticky accounts keep the legacy hard-hit behavior.',
+         subscriptionPriorityTitle: 'Subscription priority',
+         subscriptionPriorityDescription: 'When enabled, the scheduler scores ChatGPT subscription accounts first and falls back to non-subscription accounts only if no subscription slot can be acquired.',
++        resetWindowModeTitle: 'Reset window',
++        resetWindowModeDescription: 'Short keeps the existing 5-hour/session behavior. Long adds a score preference for an earlier recorded 7-day, 30-day, or other long quota reset. Strict long tries usable accounts in reset-time order for new requests.',
++        resetWindowShort: 'Short (5h/session)',
++        resetWindowLong: 'Long quota window (weighted)',
++        resetWindowLongStrict: 'Long quota window (strict expiry first)',
+         weightsTitle: 'Scheduler weight overrides',
+         weightsDescription: 'Blank values use config/environment values; when config is not set, built-in defaults apply. Non-blank page settings take priority.',
+         defaultPlaceholder: 'config/default: {value}',
+diff --git a/frontend/src/i18n/locales/zh/admin/settings.ts b/frontend/src/i18n/locales/zh/admin/settings.ts
+index 27b282b88..c20143cbd 100644
+--- a/frontend/src/i18n/locales/zh/admin/settings.ts
++++ b/frontend/src/i18n/locales/zh/admin/settings.ts
+@@ -1269,6 +1269,11 @@ export default {
+         stickyWeightedDescription: '开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。',
+         subscriptionPriorityTitle: '订阅优先',
+         subscriptionPriorityDescription: '开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。',
++        resetWindowModeTitle: '重置窗口',
++        resetWindowModeDescription: '短窗口保持现有 5 小时/会话窗口行为；长窗口按已记录的 7 天、30 天等额度重置时间加权优先。严格长窗口会在新请求中先尝试最早重置且仍可用的账号。',
++        resetWindowShort: '短窗口（5 小时/会话）',
++        resetWindowLong: '长额度窗口（加权）',
++        resetWindowLongStrict: '长额度窗口（严格到期优先）',
+         weightsTitle: '调度权值覆盖',
+         weightsDescription: '留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。',
+         defaultPlaceholder: '配置/默认：{value}',
+diff --git a/frontend/src/views/admin/SettingsView.vue b/frontend/src/views/admin/SettingsView.vue
+index 36bbfd4b4..738df103d 100644
+--- a/frontend/src/views/admin/SettingsView.vue
++++ b/frontend/src/views/admin/SettingsView.vue
+@@ -5163,6 +5163,39 @@
+                 <Toggle v-model="form.openai_advanced_scheduler_subscription_priority_enabled" />
+               </div>
+ 
++              <div
++                v-if="form.openai_advanced_scheduler_enabled"
++                class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
++              >
++                <div class="min-w-0">
++                  <label
++                    for="openai-advanced-scheduler-reset-window-mode"
++                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
++                  >
++                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowModeTitle") }}
++                  </label>
++                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
++                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowModeDescription") }}
++                  </p>
++                </div>
++                <select
++                  id="openai-advanced-scheduler-reset-window-mode"
++                  v-model="form.openai_advanced_scheduler_reset_window_mode"
++                  class="input w-full shrink-0 sm:w-52"
++                  data-testid="openai-advanced-scheduler-reset-window-mode"
++                >
++                  <option value="short">
++                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowShort") }}
++                  </option>
++                  <option value="long">
++                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowLong") }}
++                  </option>
++                  <option value="long_strict">
++                    {{ t("admin.settings.openaiExperimentalScheduler.resetWindowLongStrict") }}
++                  </option>
++                </select>
++              </div>
++
+               <div
+                 v-if="form.openai_advanced_scheduler_enabled"
+                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
+@@ -9706,6 +9739,7 @@ type SettingsForm = Omit<
+   openai_advanced_scheduler_enabled: boolean;
+   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
+   openai_advanced_scheduler_subscription_priority_enabled: boolean;
++  openai_advanced_scheduler_reset_window_mode: "short" | "long" | "long_strict";
+   openai_advanced_scheduler_lb_top_k: string;
+   openai_advanced_scheduler_weight_priority: string;
+   openai_advanced_scheduler_weight_load: string;
+@@ -9963,6 +9997,7 @@ const form = reactive<SettingsForm>({
+   openai_advanced_scheduler_enabled: false,
+   openai_advanced_scheduler_sticky_weighted_enabled: false,
+   openai_advanced_scheduler_subscription_priority_enabled: false,
++  openai_advanced_scheduler_reset_window_mode: "short",
+   openai_advanced_scheduler_lb_top_k: "",
+   openai_advanced_scheduler_weight_priority: "",
+   openai_advanced_scheduler_weight_load: "",
+@@ -11709,6 +11744,8 @@ async function saveSettings() {
+         form.openai_advanced_scheduler_sticky_weighted_enabled,
+       openai_advanced_scheduler_subscription_priority_enabled:
+         form.openai_advanced_scheduler_subscription_priority_enabled,
++      openai_advanced_scheduler_reset_window_mode:
++        form.openai_advanced_scheduler_reset_window_mode,
+       openai_advanced_scheduler_lb_top_k:
+         form.openai_advanced_scheduler_lb_top_k.trim(),
+       openai_advanced_scheduler_weight_priority:
+diff --git a/frontend/src/views/admin/__tests__/SettingsView.spec.ts b/frontend/src/views/admin/__tests__/SettingsView.spec.ts
+index 399088f42..3c4261f68 100644
+--- a/frontend/src/views/admin/__tests__/SettingsView.spec.ts
++++ b/frontend/src/views/admin/__tests__/SettingsView.spec.ts
+@@ -510,6 +510,7 @@ const baseSettingsResponse = {
+   openai_advanced_scheduler_enabled: false,
+   openai_advanced_scheduler_sticky_weighted_enabled: false,
+   openai_advanced_scheduler_subscription_priority_enabled: false,
++  openai_advanced_scheduler_reset_window_mode: "short",
+   openai_advanced_scheduler_lb_top_k: "",
+   openai_advanced_scheduler_weight_priority: "",
+   openai_advanced_scheduler_weight_load: "",
+@@ -1583,6 +1584,32 @@ describe("admin SettingsView payment visible method controls", () => {
+     }));
+   });
+ 
++  it("saves the selected advanced scheduler reset window mode", async () => {
++    const wrapper = mountView();
++    await flushPromises();
++    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
++    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-advanced-scheduler-reset-window-mode"]');
++    await select.setValue("long");
++    await wrapper.find("form").trigger("submit.prevent");
++    await flushPromises();
++    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
++      openai_advanced_scheduler_reset_window_mode: "long",
++    }));
++  });
++
++  it("saves the strict long reset window mode", async () => {
++    const wrapper = mountView();
++    await flushPromises();
++    await wrapper.get('[data-testid="openai-advanced-scheduler-toggle"]').setValue(true);
++    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-advanced-scheduler-reset-window-mode"]');
++    await select.setValue("long_strict");
++    await wrapper.find("form").trigger("submit.prevent");
++    await flushPromises();
++    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
++      openai_advanced_scheduler_reset_window_mode: "long_strict",
++    }));
++  });
++
+   it("places and explains rate controls for both scheduling modes", async () => {
+     const wrapper = mountView();
+ 
