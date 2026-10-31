@@ -88,7 +88,8 @@ def prepare(repo, upstream_ref, tag, source):
         (worktree / "DOWNSTREAM_RELEASE.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
-        git(worktree, "add", "--", *manifest["maintenance_paths"], "DOWNSTREAM_RELEASE.json")
+        # Some official tags ignore docs/; stage only this explicit allowlist.
+        git(worktree, "add", "--force", "--", *manifest["maintenance_paths"], "DOWNSTREAM_RELEASE.json")
         git(worktree, "commit", "-m", "chore(downstream): prepare " + tag + " review base [skip ci]")
         base_sha = git(worktree, "rev-parse", "HEAD").decode().strip()
         for patch, data in patch_data:
