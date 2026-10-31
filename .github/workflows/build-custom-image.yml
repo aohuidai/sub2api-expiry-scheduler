@@ -53,6 +53,13 @@ jobs:
             exit 1
           fi
           runtime_version="${BASH_REMATCH[1]}-dai.${BASH_REMATCH[2]}"
+          upstream_version="${BASH_REMATCH[1]}"
+          python - "$upstream_version" <<'PY'
+          import json, pathlib, sys
+          metadata = json.loads(pathlib.Path('DOWNSTREAM_RELEASE.json').read_text())
+          if metadata['upstream_tag'] != 'v' + sys.argv[1]:
+              raise SystemExit('Image tag does not match the prepared official baseline')
+          PY
           echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
           echo "runtime_version=$runtime_version" >> "$GITHUB_OUTPUT"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

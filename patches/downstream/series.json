@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "baseline": "v0.2.19",
+  "patches": [
+    {
+      "id": "openai-long-window-reset",
+      "file": "0001-openai-long-window-reset.patch",
+      "subject": "feat(scheduler): preserve long-window and strict expiry priority"
+    }
+  ],
+  "maintenance_paths": [
+    "patches/downstream",
+    "tools/downstream",
+    "docs/CUSTOM_SCHEDULER.md",
+    ".github/workflows/propose-upstream-sync.yml",
+    ".github/workflows/build-custom-image.yml",
+    ".github/workflows/downstream-tests.yml"
+  ]
+}

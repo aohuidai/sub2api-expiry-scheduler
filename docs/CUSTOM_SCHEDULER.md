@@ -1,146 +1,142 @@
-# Custom Scheduler Maintenance
+# Sub2API Downstream Maintenance
 
-This fork keeps one deliberately small local feature on top of official
-Sub2API releases: the OpenAI advanced scheduler can score the recorded long
-quota window instead of the usual 5-hour/session window.
+This repository maintains a small feature patch queue on official Sub2API
+releases. The feature source of truth is `patches/downstream/series.json` and
+the patches it lists. Every new version is rebuilt from its official release
+tag; it does not merge the entire old custom release into the new one.
 
-## What The Patch Does
+## Account Scheduling Feature
 
-The setting is named `openai_advanced_scheduler_reset_window_mode`.
+`openai_advanced_scheduler_reset_window_mode` has three modes:
 
-- `short` is the upstream-compatible default. The reset score uses the Codex
-  5-hour window, then the legacy session window.
-- `long` uses the canonical `codex_7d` quota reset timestamp as a weighted
-  score signal. Despite the
-  historic field name, this can represent a 7-day, 30-day, or another long
-  provider window. Accounts without a valid future long reset timestamp get a
-  reset factor of zero; they never fall back to a 5-hour window in this mode.
-- `long_strict` is the explicit use-it-or-lose-it mode. For a new
-  load-balanced request, usable accounts with a future long reset timestamp
-  are tried in earliest-reset order, before accounts with stale or unknown
-  quota snapshots. It bypasses TopK random selection for that primary order,
-  but falls back safely when an earlier account is full, rate-limited, or no
-  longer schedulable.
+- `short`: official-compatible five-hour/session-window scoring (default).
+- `long`: a weighted preference for future long quota reset times. The reset
+  score weight controls its strength alongside other scheduling signals.
+- `long_strict`: try eligible accounts in earliest future long-reset order for
+  newly load-balanced requests. This bypasses TopK random ordering and falls
+  back when an earlier account is full, rate-limited, or unavailable.
 
-The existing reset-score weight still controls how strongly `long` affects the
-final choice. A reset weight of `1` is a preference among the other health,
-load, queue, sticky-session, and priority signals. `long_strict` does not need
-a large reset weight because reset time becomes the first ordering criterion.
-Neither mode can select an account that is already at its provider limit, and
-requests carrying `previous_response_id` remain pinned to their upstream
-account to preserve conversation correctness.
+The historic `codex_7d` field can hold a 7-day, 30-day, or other long window.
+Explicitly short or invalid durations are rejected. Missing or past reset
+times get no long-window preference. Normal provider limits still apply.
+Existing previous-response and session bindings retain conversation affinity.
 
-The setting is available in the admin Settings page while the OpenAI advanced
-scheduler is enabled. Existing deployments default to `short`, so upgrading
-this fork alone does not change traffic routing.
+The feature patch includes backend logic, settings API/cache/audit support,
+admin UI, translations, and regression tests as one logical change. Maintenance
+scripts and image workflows are separate from the application feature.
 
-## Branch And Release Model
+## Branches And Reviews
 
-`main` is the deployable custom fork. It contains an official release baseline
-plus this patch. Do not replace `main` with upstream or force-push it to an
-official tag.
+- `main` maintains the patch queue, release tooling, and a tested application
+  checkout. A push to `main` does not deploy or publish an image.
+- Official `Wei-Shaw/sub2api` release tags are the unmodified upstream source.
+- `release/vX.Y.Z` starts at the official tag plus the explicitly allowlisted
+  maintenance files. It is a version-specific review base.
+- `custom/vX.Y.Z` adds the feature patches in manifest order. The generated PR
+  targets `release/vX.Y.Z`, so its diff shows application features rather than
+  every change made by upstream since the last custom release.
+- After reviewing checks, merge that PR into its version's release branch.
+  Only an explicit `dai-vX.Y.Z.N` tag on that reviewed result publishes an
+  ARM64 image. Runtime versions use compatible SemVer, e.g. `0.2.19-dai.1`.
 
-Custom images use `dai-vX.Y.Z.N` tags, such as `dai-v0.2.13.1`. This avoids
-triggering the upstream release workflow, and each image remains pinned to a
-specific reviewed source revision. The running binary reports the compatible
-semantic version `0.2.13-dai.1`, so the admin update check continues to compare
-correctly against official versions.
+Version branches are never force-pushed by automation. Existing open, closed,
+or merged proposals are recognized, and retries do not overwrite human work.
+Old deployment tags and branches remain available for rollback.
 
-The `Build Custom Image` workflow also publishes ARM64 images to:
+`DOWNSTREAM_RELEASE.json` records the official tag/commit, maintenance commit,
+and SHA-256 of each applied feature patch. Image builds reject a version tag
+that does not match this metadata.
 
-```text
-ghcr.io/aohuidai/sub2api-expiry-scheduler:<custom-tag>
-```
+## Automatic Preparation
 
-The image is intentionally never tagged `latest`.
+`Propose Upstream Sync` checks the latest official stable release daily. It
+also supports manual dispatch with an explicit official tag. It runs only from
+`main`, prepares both version branches locally, then pushes them atomically
+and opens the review PR. It never merges, tags, builds, or deploys a release.
 
-The production Oracle host currently uses a local ARM64 build from the reviewed
-tag rather than pulling the private GHCR package. That keeps the repository and
-package private and avoids storing a GitHub package token on the server. GHCR
-is therefore a build artifact and an optional future deployment source, not a
-deployment prerequisite. If GHCR is used later, give the host a dedicated
-read-only `read:packages` credential outside this repository and outside
-Compose files.
-
-## Updating From Official Sub2API
-
-`Propose Upstream Sync` runs daily and can also be run manually. It obtains the
-latest official GitHub release and, only when needed, opens a branch named
-`sync/upstream-<tag>` and a pull request to `main`.
-
-It does not merge the PR, build an image, or touch the server. If Git reports a
-conflict, the workflow stops before pushing a partial branch. Resolve that
-conflict locally, preserve the tests below, and open the sync PR yourself.
-
-Before accepting a sync PR:
-
-1. Check the upstream release notes and the PR diff.
-2. Verify the scheduler setting, tests, and UI still build.
-3. Merge the reviewed PR into `main`.
-4. Create and push a new annotated `dai-v...` tag to build a fresh ARM64 image.
-5. Deploy that exact tag only after review and a fresh server backup. Never
-   change production because a GitHub workflow merely detected an upstream
-   release.
-
-Useful local commands:
+Preparation uses:
 
 ```bash
-git fetch upstream --tags
-git switch main
-git switch -c sync/upstream-vX.Y.Z
-git merge --no-ff upstream/vX.Y.Z
+git fetch --no-tags upstream refs/tags/vX.Y.Z:refs/tags/upstream/vX.Y.Z
+python3 tools/downstream/prepare_release.py \
+  --upstream-ref refs/tags/upstream/vX.Y.Z \
+  --upstream-tag vX.Y.Z --source-ref main --output /tmp/release.json
 ```
 
-### Oracle Deployment Path
+The script creates commits in an isolated worktree and prints the candidate
+names/SHAs in the output JSON. It does not move `main` or publish anything.
+If a patch conflicts, it stops with the feature ID and preserves the worktree
+for inspection. Adapt that feature, update its patch in the maintenance branch,
+and retry. No partial version branches are pushed on a preparation failure.
 
-For the current private deployment, archive the reviewed tag, transfer only
-that source archive to the Oracle host, and build an ARM64 image there. The
-running Compose image must stay pinned to the matching custom tag, for example
-`sub2api-expiry-scheduler:dai-v0.2.13.1`.
+## Adding Or Adapting A Feature
 
-Each deployment must:
+1. Start a feature branch from the intended official baseline, applying earlier
+   patches first if the feature depends on them.
+2. Keep the behavior, UI/settings integration, and tests in that feature's
+   commits. Do not copy entire old application files over official files.
+3. Export the feature's diff with `git diff --binary --full-index BASE FEATURE`
+   into its `.patch` file. `BASE` is the official version or preceding feature,
+   not the maintenance commit containing unrelated tools.
+4. Add its ID, filename, and commit subject to `series.json` in dependency
+   order. Set `baseline` to an official tag against which the entire queue is
+   tested. Remove a patch once upstream implements the same behavior.
+5. Run queue, application, and security checks before merging the maintenance
+   change. The next official version is independently reconstructed from this
+   queue; an application-only edit is not automatically a persistent patch.
 
-1. Back up the Compose files, `.env`, PostgreSQL dump, and `/srv/sub2api/data`
-   under `/srv/backups/sub2api/` before changing the image.
-2. Validate the database dump with `pg_restore --list` and preserve checksums.
-3. Recreate only the `sub2api` Compose service with `--no-deps`.
-4. Verify Docker health, `/health`, startup logs, and the intended scheduler
-   setting before treating the deployment as complete.
+## GitHub Authentication
 
-Do not use Sub2API's online-update button for this fork: it can replace the
-custom image with an official image and remove this scheduler behavior.
+`UPSTREAM_SYNC_SSH_KEY` is a repository-only writable deploy key stored as an
+encrypted Actions secret. `actions/checkout` uses it to push version branches,
+including official workflow changes. The API uses the job's temporary
+`GITHUB_TOKEN` with `pull-requests: write`; the repository must allow Actions
+to create pull requests. No personal OAuth token is stored in Actions.
+
+The private deploy key backup and its inventory entry live in the local
+private directory, outside this repository. Never print the private key.
+Revoke it through this repository's Deploy keys settings if no longer needed.
+
+Deploy-key pushes trigger the upstream CI and Security Scan on the candidate
+commit. GitHub may additionally request approval for PR-event checks created
+with `GITHUB_TOKEN`; candidate push checks run independently. No workflow uses
+`pull_request_target` to execute unreviewed candidate code with secrets.
 
 ## Verification
 
-Run the focused checks before publishing a custom tag:
+The `Downstream Patch Queue` workflow tests isolated reconstruction, ordering,
+conflict preservation, and replay of the real patch against its baseline.
+Upstream CI retains its unit/integration tests, lint, and frontend checks.
+
+Focused application checks:
 
 ```bash
+python3 -m unittest discover -s tools/downstream -p 'test_*.py'
 cd backend
 go test ./internal/service ./internal/handler/admin
-go test -tags=unit ./internal/server
-
+go test -tags=unit ./internal/server -run '^TestAPIContracts$'
 cd ../frontend
-pnpm install --frozen-lockfile
 pnpm test:run -- src/views/admin/__tests__/SettingsView.spec.ts
 pnpm typecheck
 ```
 
-After deployment, verify the health endpoint, the admin settings response, and
-the score snapshot before enabling `long`. Enable it only after quota data has
-recorded future long-window reset times for the accounts expected to take part.
-The setting cache expires within a few seconds; a separate restart is not
-required solely to switch between `short` and `long`.
+Official v0.2.19 updates Go to 1.27.3 and patches DOMPurify, Vue, source-map-js,
+and follow-redirects. Its xlsx audit exceptions remain explicitly documented,
+time-limited upstream exceptions for write-only admin export; they are not a
+claim that the installed npm xlsx package has been patched. Keep security
+scanning enabled and review new or expired findings on each update.
 
-## Rollback
+## Deployment And Rollback
 
-Keep the last known-good custom image tag in the server change log. Roll back
-by restoring that exact pinned tag and restarting only the Sub2API service; the
-database and account data are not part of an image rollback. Do not use
-`latest` for either deployment or rollback.
+The Oracle host uses a native ARM64 Docker build from a reviewed custom tag.
+GHCR artifacts are optional; the repository/package remain private and no
+GitHub registry token is required on the server.
 
-## Boundaries
+Before deployment, back up Compose, `.env`, PostgreSQL, and application data;
+validate the dump/checksums; build the exact reviewed source; then recreate only
+`sub2api` with `--no-deps`. Check health, logs, and scheduler settings afterward.
+Record the source, tag/image, backup, and rollback in the server change log.
 
-Never put OAuth credentials, API keys, database passwords, or GitHub package
-tokens in this repository, workflow logs, issue text, or pull-request bodies.
-The fork changes scheduling behavior only; it does not modify account records,
-API keys, groups, or routes by itself.
+Do not use the application's official online-update button when this feature
+is required. For rollback, restore the prior pinned image and compatible
+scheduler setting. Database restoration is only for a deliberate full rollback.

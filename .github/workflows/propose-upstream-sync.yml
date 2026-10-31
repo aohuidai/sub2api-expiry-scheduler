@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       upstream_tag:
-        description: "Official release tag to merge; leave blank for the latest release"
+        description: "Official release tag; blank selects the latest stable release"
         required: false
         type: string
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -20,19 +20,27 @@ concurrency:
 
 jobs:
   propose:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out custom main
+      - name: Check out maintenance source with repository deploy key
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
+          ssh-key: ${{ secrets.UPSTREAM_SYNC_SSH_KEY }}
 
-      - name: Resolve official release tag
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release and check existing proposal
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           INPUT_TAG: ${{ inputs.upstream_tag }}
         run: |
           set -euo pipefail
@@ -40,68 +48,73 @@ jobs:
           if [[ -z "$tag" ]]; then
             tag="$(gh release view --repo Wei-Shaw/sub2api --json tagName --jq '.tagName')"
           fi
-          git check-ref-format --allow-onelevel "refs/tags/$tag"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid official release tag' >&2; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch selected official release
-        id: upstream
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git remote add upstream https://github.com/Wei-Shaw/sub2api.git 2>/dev/null || true
-          git fetch --no-tags upstream "refs/tags/$TAG:refs/tags/upstream/$TAG"
-          if git merge-base --is-ancestor "upstream/$TAG" origin/main; then
-            echo "already_current=true" >> "$GITHUB_OUTPUT"
+          proposal="$(gh pr list --head "custom/$tag" --base "release/$tag" --state all --json url --jq '.[0].url // empty')"
+          if [[ -n "$proposal" ]]; then
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+            echo "Existing review (open, closed or merged): $proposal" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "already_current=false" >> "$GITHUB_OUTPUT"
+            echo "existing=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check for an existing proposal
-        id: existing
-        if: steps.upstream.outputs.already_current != 'true'
+      - name: Prepare official release plus feature patches
+        if: steps.release.outputs.existing != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          branch="sync/upstream-$TAG"
-          url="$(gh pr list --base main --head "$branch" --state open --json url --jq '.[0].url')"
-          if [[ -n "$url" ]]; then
-            echo "already_open=true" >> "$GITHUB_OUTPUT"
-            echo "Existing proposal: $url"
-          else
-            echo "already_open=false" >> "$GITHUB_OUTPUT"
-          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/Wei-Shaw/sub2api.git "refs/tags/$TAG:refs/tags/upstream/$TAG"
+          python tools/downstream/prepare_release.py \
+            --upstream-ref "refs/tags/upstream/$TAG" --upstream-tag "$TAG" \
+            --source-ref HEAD --output "$RUNNER_TEMP/downstream-release.json"
 
-      - name: Merge official release into a proposal branch
-        if: steps.upstream.outputs.already_current != 'true' && steps.existing.outputs.already_open != 'true'
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
+      - name: Publish immutable review branches
+        if: steps.release.outputs.existing != 'true'
         run: |
           set -euo pipefail
-          branch="sync/upstream-$TAG"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -C "$branch" origin/main
-          if ! git merge --no-ff --no-commit "upstream/$TAG"; then
-            git merge --abort || true
-            echo "The custom patch conflicts with upstream $TAG. Resolve it locally, then open the sync PR manually." >&2
+          metadata="$RUNNER_TEMP/downstream-release.json"
+          base="$(jq -r .base_branch "$metadata")"
+          candidate="$(jq -r .candidate_branch "$metadata")"
+          base_sha="$(jq -r .base_sha "$metadata")"
+          candidate_sha="$(jq -r .candidate_sha "$metadata")"
+          # A retry after a PR API failure must preserve existing review work.
+          base_existing="$(git ls-remote --heads origin "refs/heads/$base")"
+          candidate_existing="$(git ls-remote --heads origin "refs/heads/$candidate")"
+          if [[ -z "$base_existing" && -z "$candidate_existing" ]]; then
+            git push --atomic origin "$base_sha:refs/heads/$base" "$candidate_sha:refs/heads/$candidate"
+          elif [[ -z "$base_existing" || -z "$candidate_existing" ]]; then
+            echo 'Only one review branch exists; inspect before retrying.' >&2
             exit 1
+          else
+            echo 'Reusing existing version branches without overwriting them.'
           fi
-          git commit -m "chore(upstream): merge $TAG"
-          git push --force-with-lease origin "$branch"
 
-      - name: Open a review-only pull request
-        if: steps.upstream.outputs.already_current != 'true' && steps.existing.outputs.already_open != 'true'
+      - name: Create review-only pull request
+        if: steps.release.outputs.existing != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          branch="sync/upstream-$TAG"
-          gh pr create \
-            --base main \
-            --head "$branch" \
-            --title "chore(upstream): merge $TAG" \
-            --body "Automated proposal to merge the official Sub2API release \`$TAG\` into the custom fork.\n\nThis PR is intentionally not auto-merged or deployed. Review the custom scheduler tests and the upstream diff before merging."
+          body="$RUNNER_TEMP/downstream-pr.md"
+          python - "$RUNNER_TEMP/downstream-release.json" "$body" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          patches = '\n'.join('- ' + p['id'] for p in data['patches'])
+          pathlib.Path(sys.argv[2]).write_text(
+              f"Official baseline: `{data['upstream_tag']}` (`{data['upstream_commit']}`).\n\n"
+              "This candidate starts from that official release and reapplies only the maintained feature patches. "
+              "The base branch already contains separate maintenance files, so this PR highlights application changes.\n\n"
+              f"Feature patches:\n{patches}\n\n"
+              "Review CI and Security Scan before merging into this version's release branch. "
+              "The SSH-pushed candidate triggers push checks independently of PR approval. "
+              "Merging does not build or deploy an image; publish an explicit dai-v tag after review.\n"
+          )
+          PY
+          url="$(gh pr create --base "release/$TAG" --head "custom/$TAG" \
+            --title "Apply downstream features to Sub2API $TAG" --body-file "$body")"
+          echo "Review proposal: $url" >> "$GITHUB_STEP_SUMMARY"
