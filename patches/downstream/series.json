@@ -6,6 +6,11 @@
       "id": "openai-long-window-reset",
       "file": "0001-openai-long-window-reset.patch",
       "subject": "feat(scheduler): preserve long-window and strict expiry priority"
+    },
+    {
+      "id": "frontend-security",
+      "file": "0002-frontend-security.patch",
+      "subject": "fix(security): update frontend dependencies and remove xlsx exceptions"
     }
   ],
   "maintenance_paths": [

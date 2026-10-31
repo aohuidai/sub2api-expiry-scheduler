@@ -21,9 +21,10 @@ Explicitly short or invalid durations are rejected. Missing or past reset
 times get no long-window preference. Normal provider limits still apply.
 Existing previous-response and session bindings retain conversation affinity.
 
-The feature patch includes backend logic, settings API/cache/audit support,
-admin UI, translations, and regression tests as one logical change. Maintenance
-scripts and image workflows are separate from the application feature.
+The scheduling patch includes backend logic, settings API/cache/audit support,
+admin UI, translations, and regression tests as one logical change. A second
+patch contains frontend security updates and their tests/CI runtime. Maintenance
+scripts and image workflows are separate from these application patches.
 
 ## Branches And Reviews
 
@@ -49,9 +50,10 @@ that does not match this metadata.
 
 ## Automatic Preparation
 
-`Propose Upstream Sync` checks the latest official stable release daily. It
-also supports manual dispatch with an explicit official tag. It runs only from
-`main`, prepares both version branches locally, then pushes them atomically
+`Propose Upstream Sync` checks the latest official stable release daily from
+`main`. It also supports manual dispatch with an explicit official tag and a
+maintenance branch to verify workflow changes before merging. It prepares both
+version branches locally, then pushes them atomically
 and opens the review PR. It never merges, tags, builds, or deploys a release.
 
 Preparation uses:
@@ -120,11 +122,13 @@ pnpm test:run -- src/views/admin/__tests__/SettingsView.spec.ts
 pnpm typecheck
 ```
 
-Official v0.2.19 updates Go to 1.27.3 and patches DOMPurify, Vue, source-map-js,
-and follow-redirects. Its xlsx audit exceptions remain explicitly documented,
-time-limited upstream exceptions for write-only admin export; they are not a
-claim that the installed npm xlsx package has been patched. Keep security
-scanning enabled and review new or expired findings on each update.
+Official v0.2.19 updates Go to 1.27.3 and patches DOMPurify, Vue, and source-map-js.
+The separate frontend security patch updates Vue I18n and its compiler to the
+fixed v11 line, enforces patched decode-uri-component and follow-redirects,
+and uses the official SheetJS 0.20.3 tarball in place of npm's old xlsx 0.18.5.
+The two xlsx audit exceptions are removed. Node 24 in frontend CI matches the
+existing Docker frontend builder and Vue I18n's Node >=22 requirement. Keep
+security scanning enabled and review new findings on each update.
 
 ## Deployment And Rollback
 

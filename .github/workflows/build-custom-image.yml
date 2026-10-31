@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build"
+        description: "Reviewed version release branch or tag to build"
         required: true
-        default: "main"
         type: string
       image_tag:
         description: "Pinned GHCR image tag, for example dai-v0.2.13.1"

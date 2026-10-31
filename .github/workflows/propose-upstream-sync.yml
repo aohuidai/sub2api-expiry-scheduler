@@ -20,14 +20,14 @@ concurrency:
 
 jobs:
   propose:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out maintenance source with repository deploy key
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 0
           ssh-key: ${{ secrets.UPSTREAM_SYNC_SSH_KEY }}
 
