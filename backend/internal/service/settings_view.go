@@ -276,6 +276,7 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEnabled                         bool
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool
+	OpenAIAdvancedSchedulerResetWindowMode                 string
 	OpenAIAdvancedSchedulerLBTopK                          string
 	OpenAIAdvancedSchedulerWeightPriority                  string
 	OpenAIAdvancedSchedulerWeightLoad                      string

@@ -139,3 +139,51 @@ func TestOpenAISchedulingResetWindowEnd(t *testing.T) {
 	_, ok = openAISchedulingResetWindowEnd(nil, now)
 	require.False(t, ok)
 }
+
+func TestOpenAISchedulingResetWindowEndForLongMode(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	reset := now.Add(30 * 24 * time.Hour)
+	account := &Account{Extra: map[string]any{
+		"codex_7d_window_minutes": 43200,
+		"codex_7d_reset_at":       reset.Format(time.RFC3339),
+	}}
+
+	end, ok := openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
+	require.True(t, ok)
+	require.Equal(t, reset, end)
+
+	account.Extra["codex_7d_window_minutes"] = 300
+	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
+	require.False(t, ok)
+
+	account.Extra["codex_7d_window_minutes"] = 0
+	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
+	require.False(t, ok)
+
+	account.Extra["codex_7d_window_minutes"] = "invalid"
+	_, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
+	require.False(t, ok)
+
+	delete(account.Extra, "codex_7d_window_minutes")
+	end, ok = openAISchedulingResetWindowEndForMode(account, openAIAdvancedSchedulerResetWindowModeLong, now)
+	require.True(t, ok, "historical snapshots without a duration remain usable")
+	require.Equal(t, reset, end)
+}
+
+func TestOpenAISchedulerLongResetScoresMatchSnapshot(t *testing.T) {
+	now := time.Now()
+	accounts := []*Account{
+		{ID: 1, Extra: map[string]any{"codex_7d_window_minutes": 43200, "codex_7d_reset_at": now.Add(24 * time.Hour).Format(time.RFC3339)}},
+		{ID: 2, Extra: map[string]any{"codex_7d_window_minutes": 43200, "codex_7d_reset_at": now.Add(7 * 24 * time.Hour).Format(time.RFC3339)}},
+	}
+	weights := GatewayOpenAIWSSchedulerScoreWeightsView{Reset: 1}
+	snapshots := buildOpenAIAccountSchedulerScoreSnapshotWithResetWindowMode(
+		accounts,
+		nil,
+		weights,
+		false,
+		floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier),
+		openAIAdvancedSchedulerResetWindowModeLong,
+	)
+	require.Greater(t, snapshots[1].BaseScore, snapshots[2].BaseScore)
+}

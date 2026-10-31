@@ -86,6 +86,85 @@ func TestBuildOpenAIAccountLoadPlan_ResetWeightIgnoresNilWindow(t *testing.T) {
 	require.Greater(t, scores[2], scores[1], "拥有活跃窗口的账号得分高于无窗口账号")
 }
 
+func TestBuildOpenAIAccountLoadPlan_LongResetWindowPrefersSoonestLongQuotaReset(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	now := time.Now()
+	soon := now.Add(24 * time.Hour)
+	later := now.Add(7 * 24 * time.Hour)
+	filtered := []*Account{
+		{ID: 1, Priority: 0, Extra: map[string]any{
+			"codex_7d_window_minutes": 43200,
+			"codex_7d_reset_at":       later.Format(time.RFC3339),
+		}},
+		{ID: 2, Priority: 0, Extra: map[string]any{
+			"codex_7d_window_minutes": 43200,
+			"codex_7d_reset_at":       soon.Format(time.RFC3339),
+		}},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Reset = 5
+	sched := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+		cfg: cfg,
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(
+			"true", "", "", string(openAIAdvancedSchedulerResetWindowModeLong),
+		),
+	}}
+
+	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+	scores := openAIPlanScores(plan)
+	require.Greater(t, scores[2], scores[1])
+}
+
+func TestBuildOpenAIAccountLoadPlan_StrictLongResetOrdersUsableFutureWindowsBeforeFallback(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	now := time.Now()
+	soon := now.Add(24 * time.Hour)
+	later := now.Add(20 * 24 * time.Hour)
+	stale := now.Add(-time.Hour)
+	filtered := []*Account{
+		{
+			ID: 1, Priority: 0, Extra: map[string]any{
+				"codex_7d_window_minutes": 43200,
+				"codex_7d_reset_at":       later.Format(time.RFC3339),
+			},
+		},
+		{
+			// The higher priority value gives this account a worse normal score.
+			// Strict expiry mode must still try it first because it resets first.
+			ID: 2, Priority: 10, Extra: map[string]any{
+				"codex_7d_window_minutes": 43200,
+				"codex_7d_reset_at":       soon.Format(time.RFC3339),
+			},
+		},
+		{
+			ID: 3, Priority: 0, Extra: map[string]any{
+				"codex_7d_window_minutes": 43200,
+				"codex_7d_reset_at":       stale.Format(time.RFC3339),
+			},
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
+	sched := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+		cfg: cfg,
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(
+			"true", "", "", string(openAIAdvancedSchedulerResetWindowModeLongStrict),
+		),
+	}}
+
+	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+	require.True(t, plan.strictLongReset)
+	require.Len(t, plan.selectionOrder, 3)
+	require.Equal(t, int64(2), plan.selectionOrder[0].account.ID)
+	require.Equal(t, int64(1), plan.selectionOrder[1].account.ID)
+	require.Equal(t, int64(3), plan.selectionOrder[2].account.ID)
+}
+
 func TestOpenAIQuotaHeadroomFactor_PrimaryUsedPercent(t *testing.T) {
 	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
 	account := &Account{
