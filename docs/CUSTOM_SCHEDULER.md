@@ -37,8 +37,9 @@ scripts and image workflows are separate from these application patches.
   targets `release/vX.Y.Z`, so its diff shows application features rather than
   every change made by upstream since the last custom release.
 - After reviewing checks, merge that PR into its version's release branch.
-  Only an explicit `dai-vX.Y.Z.N` tag on that reviewed result publishes an
-  ARM64 image. Runtime versions use compatible SemVer, e.g. `0.2.19-dai.1`.
+  Merging the version PR automatically builds its reviewed merge commit as an
+  ARM64 image. The image/source tag is derived from release metadata, e.g.
+  `dai-v0.2.19.2`; runtime versions use SemVer, e.g. `0.2.19-dai.2`.
 
 Version branches are never force-pushed by automation. Existing open, closed,
 or merged proposals are recognized, and retries do not overwrite human work.
@@ -49,8 +50,26 @@ For a new custom feature on the same official version, dispatch with
 `custom/vX.Y.Z-r2` branches and a new review; it preserves the first review.
 
 `DOWNSTREAM_RELEASE.json` records the official tag/commit, maintenance commit,
-and SHA-256 of each applied feature patch. Image builds reject a version tag
-that does not match this metadata.
+custom revision, and SHA-256 of each applied feature patch. Image builds reject
+a version tag or review branch that does not match this metadata.
+
+## Building An Image
+
+After merging a `custom/...` -> `release/...` version PR, `Build Custom Image`
+runs automatically. A closed but unmerged PR does not build. The version source
+tag is also created automatically without triggering a recursive tag build.
+
+For a manual build, select `Build Custom Image` and click `Run workflow` from
+`main`. There are no required input fields. It selects the highest official
+version and custom revision among merged version PRs, reads that exact merge
+commit's metadata, and derives the source/image tag. An older backport merged
+later cannot replace a newer reviewed release as the default selection.
+
+The build never takes the head of an unreviewed candidate or the application
+checkout on `main` as its default. Existing source tags must resolve to the
+same reviewed commit; they are not moved to publish different code. Explicit
+`dai-v...` tag pushes remain a supported build trigger. Server deployment is
+still a separate operation after publication.
 
 ## Automatic Preparation
 
@@ -58,7 +77,8 @@ that does not match this metadata.
 `main`. It also supports manual dispatch with an explicit official tag and a
 maintenance branch to verify workflow changes before merging. It prepares both
 version branches locally, then pushes them atomically
-and opens the review PR. It never merges, tags, builds, or deploys a release.
+and opens the review PR. Preparation itself never merges, builds, or deploys
+a release. Image publication begins only after the version PR is merged.
 
 Preparation uses:
 
