@@ -15,6 +15,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -34,6 +41,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:

@@ -28,8 +28,8 @@ scripts and image workflows are separate from these application patches.
 
 ## Branches And Reviews
 
-- `main` maintains the patch queue, release tooling, and a tested application
-  checkout. A push to `main` does not deploy or publish an image.
+- `main` maintains the patch queue and release tooling. It is not deployed
+  directly; CI reconstructs the declared baseline plus patches before testing.
 - Official `Wei-Shaw/sub2api` release tags are the unmodified upstream source.
 - `release/vX.Y.Z` starts at the official tag plus the explicitly allowlisted
   maintenance files. It is a version-specific review base.
