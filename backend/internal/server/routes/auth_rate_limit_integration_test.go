@@ -18,7 +18,7 @@ import (
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
-const authRouteRedisImageTag = "redis:8.4-alpine"
+const authRouteRedisImageTag = "redis:8-alpine"
 
 func TestAuthRegisterRateLimitThresholdHitReturns429(t *testing.T) {
 	ctx := context.Background()
