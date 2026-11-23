@@ -11,6 +11,11 @@
       "id": "frontend-security",
       "file": "0002-frontend-security.patch",
       "subject": "fix(security): update SheetJS export dependency"
+    },
+    {
+      "id": "integration-redis-image",
+      "file": "0003-integration-redis-image.patch",
+      "subject": "test(integration): use the supported Redis 8 Alpine image"
     }
   ],
   "maintenance_paths": [
