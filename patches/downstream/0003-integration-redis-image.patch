@@ -1,0 +1,53 @@
+From 6120b69cedcdafb063993e80b38a601e5f45fce6 Mon Sep 17 00:00:00 2001
+From: Codex <codex@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 21:30:13 +0800
+Subject: [PATCH] test(integration): use the supported Redis 8 Alpine image
+
+---
+ backend/internal/middleware/rate_limiter_integration_test.go    | 2 +-
+ backend/internal/repository/integration_harness_test.go         | 2 +-
+ .../internal/server/routes/auth_rate_limit_integration_test.go  | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/backend/internal/middleware/rate_limiter_integration_test.go b/backend/internal/middleware/rate_limiter_integration_test.go
+index 1161364b7..9240e84c9 100644
+--- a/backend/internal/middleware/rate_limiter_integration_test.go
++++ b/backend/internal/middleware/rate_limiter_integration_test.go
+@@ -19,7 +19,7 @@ import (
+ 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+ )
+ 
+-const redisImageTag = "redis:8.4-alpine"
++const redisImageTag = "redis:8-alpine"
+ 
+ func TestRateLimiterSetsTTLAndDoesNotRefresh(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+diff --git a/backend/internal/repository/integration_harness_test.go b/backend/internal/repository/integration_harness_test.go
+index d33b22944..d382a7ee0 100644
+--- a/backend/internal/repository/integration_harness_test.go
++++ b/backend/internal/repository/integration_harness_test.go
+@@ -30,7 +30,7 @@ import (
+ )
+ 
+ const (
+-	redisImageTag    = "redis:8.4-alpine"
++	redisImageTag    = "redis:8-alpine"
+ 	postgresImageTag = "postgres:18.1-alpine3.23"
+ )
+ 
+diff --git a/backend/internal/server/routes/auth_rate_limit_integration_test.go b/backend/internal/server/routes/auth_rate_limit_integration_test.go
+index 8a0ef8600..0867b793e 100644
+--- a/backend/internal/server/routes/auth_rate_limit_integration_test.go
++++ b/backend/internal/server/routes/auth_rate_limit_integration_test.go
+@@ -18,7 +18,7 @@ import (
+ 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+ )
+ 
+-const authRouteRedisImageTag = "redis:8.4-alpine"
++const authRouteRedisImageTag = "redis:8-alpine"
+ 
+ func TestAuthRegisterRateLimitThresholdHitReturns429(t *testing.T) {
+ 	ctx := context.Background()
+-- 
+2.54.0 (Apple Git-157)
+
