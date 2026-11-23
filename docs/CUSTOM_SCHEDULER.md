@@ -154,6 +154,10 @@ reliably recognize the CDN tarball version, so the two upstream `xlsx` audit
 exceptions remain documented until the advisory tooling can verify it directly.
 Keep security scanning enabled and review new findings on each update.
 
+The integration test patch uses `redis:8-alpine`, the same supported tag used
+by the production Compose files. It replaces a stale `redis:8.4-alpine` test
+tag that Docker Hub no longer serves; no application runtime image changes.
+
 ## Deployment And Rollback
 
 The Oracle host uses a native ARM64 Docker build from a reviewed custom tag.
