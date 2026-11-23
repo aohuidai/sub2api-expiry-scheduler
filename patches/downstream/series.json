@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "baseline": "v0.2.19",
+  "baseline": "v0.2.24",
   "patches": [
     {
       "id": "openai-long-window-reset",
@@ -10,7 +10,7 @@
     {
       "id": "frontend-security",
       "file": "0002-frontend-security.patch",
-      "subject": "fix(security): update frontend dependencies and remove xlsx exceptions"
+      "subject": "fix(security): update SheetJS export dependency"
     }
   ],
   "maintenance_paths": [
