@@ -12,6 +12,13 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - name: Check deployment scripts
         run: |
           /bin/bash -n deploy/apple-container.sh
@@ -25,6 +32,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - name: Check Docker Compose simple mode environment
         run: /bin/sh deploy/tests/docker-compose-simple-mode-env-test.sh
       - uses: actions/setup-go@v6
@@ -35,7 +49,8 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          expected="$(awk '$1 == "go" { print $2; exit }' backend/go.mod)"
+          case "$(go version)" in *"go${expected}"*) ;; *) exit 1;; esac
       - name: Unit tests
         working-directory: backend
         run: make test-unit
@@ -47,6 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -67,6 +89,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Prepare current downstream candidate
+        run: python tools/downstream/prepare_ci_source.py
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -75,7 +104,8 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          expected="$(awk '$1 == "go" { print $2; exit }' backend/go.mod)"
+          case "$(go version)" in *"go${expected}"*) ;; *) exit 1;; esac
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

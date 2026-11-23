@@ -28,8 +28,8 @@ scripts and image workflows are separate from these application patches.
 
 ## Branches And Reviews
 
-- `main` maintains the patch queue, release tooling, and a tested application
-  checkout. A push to `main` does not deploy or publish an image.
+- `main` maintains the patch queue and release tooling. It is not deployed
+  directly; CI reconstructs the declared baseline plus patches before testing.
 - Official `Wei-Shaw/sub2api` release tags are the unmodified upstream source.
 - `release/vX.Y.Z` starts at the official tag plus the explicitly allowlisted
   maintenance files. It is a version-specific review base.
@@ -146,13 +146,13 @@ pnpm test:run -- src/views/admin/__tests__/SettingsView.spec.ts
 pnpm typecheck
 ```
 
-Official v0.2.19 updates Go to 1.27.3 and patches DOMPurify, Vue, and source-map-js.
-The separate frontend security patch updates Vue I18n and its compiler to the
-fixed v11 line, enforces patched decode-uri-component and follow-redirects,
-and uses the official SheetJS 0.20.3 tarball in place of npm's old xlsx 0.18.5.
-The two xlsx audit exceptions are removed. Node 24 in frontend CI matches the
-existing Docker frontend builder and Vue I18n's Node >=22 requirement. Keep
-security scanning enabled and review new findings on each update.
+Official v0.2.24 uses Go 1.27.4, fixed Brotli and zstd dependencies, Node 24,
+and Vue I18n v11. The separate frontend security patch replaces npm's old
+`xlsx` 0.18.5 with the official SheetJS 0.20.3 tarball and verifies the admin
+export API can create and read a workbook. pnpm's advisory feed does not
+reliably recognize the CDN tarball version, so the two upstream `xlsx` audit
+exceptions remain documented until the advisory tooling can verify it directly.
+Keep security scanning enabled and review new findings on each update.
 
 ## Deployment And Rollback
 
