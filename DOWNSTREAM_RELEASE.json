@@ -1,0 +1,20 @@
+{
+  "upstream_tag": "v0.2.25",
+  "custom_revision": 1,
+  "upstream_commit": "348997267d756eab5729bb6b78a275a15d18796a",
+  "maintenance_commit": "ea9843e1addbeb6cfc087ce9f372cef80687efb4",
+  "patches": [
+    {
+      "id": "openai-long-window-reset",
+      "sha256": "38f7497667c50750c936693ed255e9f14293ab26a3a007c9e2c6218c7e83e857"
+    },
+    {
+      "id": "frontend-security",
+      "sha256": "ce711b1084c7ed106775b866266d530fe50ff054c24ec43cc9e8c2a71f22e5e7"
+    },
+    {
+      "id": "integration-redis-image",
+      "sha256": "5c7334909c441a51067429e594d361a968648fd12c323d0840b912aa6a9e25b1"
+    }
+  ]
+}
