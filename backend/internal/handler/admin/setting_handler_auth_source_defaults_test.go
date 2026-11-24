@@ -225,6 +225,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 		"openai_advanced_scheduler_enabled":                       true,
 		"openai_oauth_scheduling_rate_multiplier":                 0.05,
 		"openai_advanced_scheduler_subscription_priority_enabled": true,
+		"openai_advanced_scheduler_reset_window_mode":             "long",
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -244,6 +245,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
 	require.Equal(t, "0.05", repo.values[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
+	require.Equal(t, "long", repo.values[service.SettingKeyOpenAIAdvancedSchedulerResetWindowMode])
 
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -256,6 +258,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
 	require.Equal(t, 0.05, data["openai_oauth_scheduling_rate_multiplier"])
 	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
+	require.Equal(t, "long", data["openai_advanced_scheduler_reset_window_mode"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

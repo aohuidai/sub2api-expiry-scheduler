@@ -19,7 +19,7 @@ import (
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
-const redisImageTag = "redis:8.4-alpine"
+const redisImageTag = "redis:8-alpine"
 
 func TestRateLimiterSetsTTLAndDoesNotRefresh(t *testing.T) {
 	gin.SetMode(gin.TestMode)
