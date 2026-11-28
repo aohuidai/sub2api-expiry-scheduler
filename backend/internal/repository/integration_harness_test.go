@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	redisImageTag    = "redis:8.4-alpine"
+	redisImageTag    = "redis:8-alpine"
 	postgresImageTag = "postgres:18.1-alpine3.23"
 )
 
